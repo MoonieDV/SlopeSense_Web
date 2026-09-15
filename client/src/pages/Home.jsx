@@ -96,7 +96,21 @@ const pageMeta = {
 
 function Logo({ small = false, stacked = false }) {
   if (stacked) {
-    return <div className="flex flex-col items-center text-center"><img src="/SlopeSenseLogo.jpg" alt="SlopeSense logo" className="h-28 w-44 object-contain mix-blend-multiply" /><div className="mt-2 text-4xl font-extrabold tracking-tight text-[#09633b]">SlopeSense</div><div className="mt-2 text-xl text-[#3d4b59]">BDRRMC Dashboard</div></div>;
+    return (
+      <div className="flex flex-col items-center text-center">
+        <img
+          src="/SlopeSenseLogo.jpg"
+          alt="SlopeSense logo"
+          className="h-32 w-48 object-contain mix-blend-multiply sm:h-36 sm:w-52"
+        />
+        <div className="mt-3 text-4xl sm:text-5xl font-black tracking-tight text-[#006b37]">
+          SlopeSense
+        </div>
+        <div className="mt-2 text-lg sm:text-xl font-bold tracking-tight text-[#334155]">
+          BDRRMC Dashboard
+        </div>
+      </div>
+    );
   }
   return (
     <div className={`flex items-center ${small ? "gap-2.5" : "gap-3"}`}>
@@ -2207,7 +2221,111 @@ function Sidebar({ page, setPage, open, setOpen }) {
 }
 
 function Login({ onEnter }) {
-  return <main className="login-reference-scene min-h-screen bg-white"><section className="grid min-h-screen overflow-hidden lg:grid-cols-[minmax(360px,1fr)_minmax(390px,0.92fr)]"><div className="relative flex min-h-[300px] items-center justify-center px-6 pb-20 pt-12 sm:min-h-[390px] lg:min-h-full lg:items-start lg:pb-0 lg:pt-[17vh]"><div className="relative z-10 text-center"><Logo stacked /><div className="mt-6 flex items-center justify-center gap-5 text-sm text-[#5d6e64]"><span className="h-px w-20 bg-[#91bea5]" /><ShieldCheck size={21} className="text-[#087442]" /><span className="h-px w-20 bg-[#91bea5]" /></div><p className="mt-3 text-xs text-[#53645b]">Monitoring Slopes. Protecting Communities.</p></div></div><div className="relative flex items-start justify-center px-5 pb-16 pt-0 sm:px-8 lg:px-16 lg:pt-[7vh]"><form className="relative z-10 w-full max-w-[392px] rounded-lg border border-[#dce5df] bg-white/95 px-7 py-9 shadow-[0_16px_36px_rgba(21,45,33,0.1)] backdrop-blur-sm sm:px-8" onSubmit={(event) => { event.preventDefault(); onEnter(); }}><h1 className="text-center text-2xl font-extrabold tracking-tight text-[#075a33]">Welcome Back!</h1><p className="mt-2 text-center text-sm text-[#56677b]">Sign in to your BDRRMC account</p><div className="mt-8 space-y-5"><label className="block text-xs font-extrabold text-[#111827]">Email Address<span className="mt-2 flex h-10 items-center rounded-md border border-[#86ba9e] bg-white px-3 text-[#0b6a3e] focus-within:border-[#087442] focus-within:ring-2 focus-within:ring-[#087442]/10"><Mail size={15} strokeWidth={2} /><input className="min-w-0 flex-1 bg-transparent px-4 text-xs font-normal text-[#243447] outline-none placeholder:text-[#80909d]" placeholder="Enter your email" type="email" /></span></label><label className="block text-xs font-extrabold text-[#111827]">Password<span className="mt-2 flex h-10 items-center rounded-md border border-[#cbd5dd] bg-white px-3 text-[#0b6a3e] focus-within:border-[#087442] focus-within:ring-2 focus-within:ring-[#087442]/10"><Lock size={15} strokeWidth={2} /><input className="min-w-0 flex-1 bg-transparent px-4 text-xs font-normal text-[#243447] outline-none placeholder:text-[#80909d]" placeholder="Enter your password" type="password" /><button type="button" aria-label="Show password" className="grid h-7 w-7 shrink-0 place-items-center rounded text-[#536172] hover:bg-[#f1f6f3]"><Eye size={15} /></button></span></label><div className="flex items-center justify-between gap-4 text-xs"><label className="flex items-center gap-2 text-[#475569]"><input type="checkbox" className="h-3.5 w-3.5 rounded border-[#cbd5dd] accent-[#087442]" /> Remember me</label><button type="button" className="font-extrabold text-[#006b37] hover:underline">Forgot password?</button></div><button type="submit" className="flex h-[42px] w-full items-center justify-center gap-2 rounded-md bg-[#006b37] text-sm font-extrabold text-white shadow-[0_8px_18px_rgba(8,116,66,0.18)] transition hover:bg-[#04582f]"><LogIn size={17} />Log In</button></div><div className="mt-5 flex items-center gap-3 text-xs text-[#536172]"><span className="h-px flex-1 bg-[#dbe3dd]" /><span>or</span><span className="h-px flex-1 bg-[#dbe3dd]" /></div><div className="mt-4 text-center text-[0.68rem] text-[#536172]">© 2026 SlopeSense. All rights reserved.</div></form></div></section></main>;
+  const [showPassword, setShowPassword] = useState(false);
+
+  return (
+    <main className="login-reference-scene min-h-screen bg-white">
+      <section className="grid min-h-screen overflow-hidden lg:grid-cols-2">
+        <div className="relative flex min-h-[340px] items-center justify-center px-6 py-12 lg:min-h-full">
+          <div className="relative z-10 text-center max-w-md">
+            <Logo stacked />
+            <div className="mt-8 flex items-center justify-center gap-4">
+              <span className="h-px w-24 bg-[#cbd5e1]" />
+              <ShieldCheck size={24} className="text-[#006b37] shrink-0" />
+              <span className="h-px w-24 bg-[#cbd5e1]" />
+            </div>
+            <p className="mt-3.5 text-sm font-medium text-[#475569]">
+              Monitoring Slopes. Protecting Communities.
+            </p>
+          </div>
+        </div>
+
+        <div className="relative flex items-center justify-center px-6 py-12 lg:px-16">
+          <form
+            className="relative z-10 w-full max-w-[460px] rounded-2xl border border-[#dfe7e1] bg-white/95 p-8 sm:p-10 shadow-[0_20px_50px_rgba(0,107,55,0.06)] backdrop-blur-sm"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onEnter();
+            }}
+          >
+            <h1 className="text-center text-3xl font-extrabold tracking-tight text-[#006b37]">
+              Welcome Back!
+            </h1>
+            <p className="mt-2 text-center text-sm font-medium text-[#64748b]">
+              Sign in to your BDRRMC account
+            </p>
+
+            <div className="mt-8 space-y-5">
+              <label className="block text-sm font-bold text-[#1e293b]">
+                Email Address
+                <span className="mt-2 flex h-12 items-center rounded-xl border border-[#cbd5e1] bg-white px-4 text-[#006b37] focus-within:border-[#006b37] focus-within:ring-2 focus-within:ring-[#006b37]/15 transition">
+                  <Mail size={18} strokeWidth={2} className="shrink-0 text-[#006b37]" />
+                  <input
+                    className="min-w-0 flex-1 bg-transparent px-3 text-sm font-normal text-[#1e293b] outline-none placeholder:text-[#94a3b8]"
+                    placeholder="Enter your email"
+                    type="email"
+                    required
+                  />
+                </span>
+              </label>
+
+              <label className="block text-sm font-bold text-[#1e293b]">
+                Password
+                <span className="mt-2 flex h-12 items-center rounded-xl border border-[#cbd5e1] bg-white px-4 text-[#006b37] focus-within:border-[#006b37] focus-within:ring-2 focus-within:ring-[#006b37]/15 transition">
+                  <Lock size={18} strokeWidth={2} className="shrink-0 text-[#006b37]" />
+                  <input
+                    className="min-w-0 flex-1 bg-transparent px-3 text-sm font-normal text-[#1e293b] outline-none placeholder:text-[#94a3b8]"
+                    placeholder="Enter your password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label="Toggle password visibility"
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[#64748b] hover:bg-[#f1f5f9] transition"
+                  >
+                    <Eye size={18} />
+                  </button>
+                </span>
+              </label>
+
+              <div className="flex items-center justify-between gap-4 text-sm">
+                <label className="flex items-center gap-2 text-[#475569] font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-[#cbd5e1] accent-[#006b37] cursor-pointer"
+                  />
+                  Remember me
+                </label>
+                <button type="button" className="font-bold text-[#006b37] hover:underline">
+                  Forgot password?
+                </button>
+              </div>
+
+              <button
+                type="submit"
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#005c2e] text-base font-bold text-white shadow-md hover:bg-[#004724] transition active:scale-[0.99]"
+              >
+                <LogIn size={19} />
+                Log In
+              </button>
+            </div>
+
+            <div className="mt-7 flex items-center gap-4 text-xs font-medium text-[#94a3b8]">
+              <span className="h-px flex-1 bg-[#e2e8f0]" />
+              <span>or</span>
+              <span className="h-px flex-1 bg-[#e2e8f0]" />
+            </div>
+
+            <div className="mt-6 text-center text-xs font-medium text-[#64748b]">
+              © 2026 SlopeSense. All rights reserved.
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+  );
 }
 
 export default function Home() {
