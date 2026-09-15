@@ -2148,7 +2148,7 @@ function ReferenceProfilePage() {
   );
 }
 
-function Sidebar({ page, setPage, open, setOpen }) {
+function Sidebar({ page, setPage, open, setOpen, onLogout }) {
   const items = [
     ["dashboard", HomeIcon, "Dashboard"],
     ["sensors", Activity, "Sensor Monitoring"],
@@ -2190,7 +2190,7 @@ function Sidebar({ page, setPage, open, setOpen }) {
               </button>
             ))}
             <button
-              onClick={() => setPage("login")}
+              onClick={onLogout}
               className="flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-left text-sm font-semibold text-[#111827] transition hover:bg-[#fef2f2] hover:text-[#dc2626]"
             >
               <LogOut size={20} strokeWidth={2.2} />
@@ -2333,13 +2333,20 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
   const [markAllAlertsTrigger, setMarkAllAlertsTrigger] = useState(0);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
   if (page === "login") return <Login onEnter={() => setPage("dashboard")} />;
   const [title, subtitle] = pageMeta[page];
   return (
     <div className="min-h-screen bg-[#f7f9f7] text-[#27352f]">
       <div className="flex min-h-screen">
-        <Sidebar page={page} setPage={setPage} open={sidebarOpen} setOpen={setSidebarOpen} />
+        <Sidebar
+          page={page}
+          setPage={setPage}
+          open={sidebarOpen}
+          setOpen={setSidebarOpen}
+          onLogout={() => setLogoutConfirmOpen(true)}
+        />
         <div className="min-w-0 flex-1">
           <header className="flex h-[76px] items-center justify-between border-b border-[#e5e9e6] bg-white px-6 sm:px-8">
             <div className="flex items-center gap-3 sm:gap-4">
@@ -2400,18 +2407,6 @@ export default function Home() {
                 <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#111827]">{title}</h1>
                 <p className="mt-1 text-xs text-[#64748b]">{subtitle}</p>
               </div>
-              {(page === "dashboard" || page === "sensors") && (
-                <div className="flex items-center gap-4 rounded-xl border border-[#e2e8f0] bg-white px-4 py-2 text-xs font-semibold text-[#334155] shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-                  <span className="flex items-center gap-2">
-                    <CalendarDays size={16} className="text-[#475569]" /> May 27, 2025
-                  </span>
-                  <span className="h-4 w-px bg-[#cbd5e1]" />
-                  <span className="flex items-center gap-2">
-                    <Clock size={16} className="text-[#475569]" /> {page === "sensors" ? "10:42 AM" : "9:41 AM"}
-                  </span>
-                </div>
-              )}
-            
               {page === "alerts" && (
                 <div className="flex items-center gap-3">
                   <button
@@ -2456,6 +2451,45 @@ export default function Home() {
           </main>
         </div>
       </div>
+      {logoutConfirmOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#143a28]/35 px-4" role="presentation">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="logout-confirm-title"
+            className="w-full max-w-sm rounded-xl border border-[#dfe7e1] bg-white p-6 shadow-[0_20px_50px_rgba(20,61,42,0.2)]"
+          >
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#fff1d5] text-[#b87500]">
+                <LogOut size={19} />
+              </span>
+              <div>
+                <h2 id="logout-confirm-title" className="text-base font-extrabold text-[#1e293b]">Log out?</h2>
+                <p className="mt-1 text-sm leading-5 text-[#64748b]">Are you sure you want to leave the dashboard?</p>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setLogoutConfirmOpen(false)}
+                className="rounded-lg border border-[#dfe7e1] bg-white px-4 py-2 text-xs font-bold text-[#334155] hover:bg-slate-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLogoutConfirmOpen(false);
+                  setPage("login");
+                }}
+                className="rounded-lg bg-[#dc2626] px-4 py-2 text-xs font-bold text-white hover:bg-[#b91c1c] transition"
+              >
+                Log out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
