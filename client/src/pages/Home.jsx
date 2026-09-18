@@ -1468,6 +1468,11 @@ function AlertsPage({ openSettings, setOpenSettings, markAllTrigger }) {
 }
 
 function IncidentReportsPage() {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All Status");
+  const [typeFilter, setTypeFilter] = useState("All Incident Types");
+  const [locationFilter, setLocationFilter] = useState("All Locations");
+
   const stats = [
     { label: "Total Reports", value: "18", sub: "All time", icon: FileText, color: "text-[#f43f5e]", bg: "bg-[#ffeef0]" },
     { label: "Pending", value: "6", sub: "Awaiting review", icon: Hourglass, color: "text-[#f59e0b]", bg: "bg-[#fffbeb]" },
@@ -1584,9 +1589,31 @@ function IncidentReportsPage() {
     },
   ];
 
+  const filteredReports = reports.filter((row) => {
+    const query = searchTerm.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      [
+        row.id,
+        row.type,
+        row.desc,
+        row.location,
+        row.subLocation,
+        row.reporter,
+        row.role,
+      ].some((value) => value.toLowerCase().includes(query));
+
+    const matchesStatus = statusFilter === "All Status" || row.status === statusFilter;
+    const matchesType = typeFilter === "All Incident Types" || row.type === typeFilter;
+    const matchesLocation =
+      locationFilter === "All Locations" || row.location.includes(locationFilter) || row.subLocation.includes(locationFilter);
+
+    return matchesSearch && matchesStatus && matchesType && matchesLocation;
+  });
+
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-5">
         {stats.map((s) => {
           const IconComp = s.icon;
           return (
@@ -1612,19 +1639,29 @@ function IncidentReportsPage() {
           <div className="flex flex-1 min-w-[220px] items-center gap-2 rounded-lg border border-[#dfe6e1] bg-white px-3.5 py-2 text-[#8b9690] shadow-sm">
             <Search size={16} className="text-[#64748b]" />
             <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-transparent text-xs outline-none placeholder:text-[#94a3b8]"
               placeholder="Search reports..."
             />
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <select className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none"
+            >
               <option>All Status</option>
               <option>Pending</option>
               <option>In Progress</option>
               <option>Resolved</option>
               <option>Dismissed</option>
             </select>
-            <select className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none"
+            >
               <option>All Incident Types</option>
               <option>Landslide / Soil Movement</option>
               <option>Flooding</option>
@@ -1634,7 +1671,11 @@ function IncidentReportsPage() {
               <option>Fallen Tree</option>
               <option>Others</option>
             </select>
-            <select className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
+            <select
+              value={locationFilter}
+              onChange={(e) => setLocationFilter(e.target.value)}
+              className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none"
+            >
               <option>All Locations</option>
               <option>Purok 1</option>
               <option>Purok 2</option>
@@ -1663,61 +1704,69 @@ function IncidentReportsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f0f3f1]">
-              {reports.map((row) => (
-                <tr key={row.id} className="hover:bg-[#f8faf8] transition">
-                  <td className="py-4 pr-4 font-extrabold text-[#006b37]">
-                    {row.id}
-                  </td>
-                  <td className="py-4 pr-4">
-                    <div className="flex items-center gap-3">
-                      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${row.iconBg}`}>
-                        {row.icon ? (
-                          <img src={row.icon} alt={row.type} className="h-5 w-5 object-contain" />
-                        ) : (
-                          <row.lucideIcon size={18} className={row.lucideColor} />
-                        )}
-                      </span>
-                      <div>
-                        <div className="font-bold text-[#1e293b]">{row.type}</div>
-                        <div className="text-[11px] text-[#64748b]">{row.desc}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="py-4 pr-4">
-                    <div className="font-semibold text-[#1e293b]">{row.location}</div>
-                    <div className="text-[11px] text-[#64748b]">{row.subLocation}</div>
-                  </td>
-                  <td className="py-4 pr-4">
-                    <div className="font-semibold text-[#1e293b]">{row.reporter}</div>
-                    <div className="text-[11px] text-[#64748b]">{row.role}</div>
-                  </td>
-                  <td className="py-4 pr-4">
-                    <div className="text-[#334155]">{row.date}</div>
-                    <div className="text-[11px] text-[#64748b]">{row.time}</div>
-                  </td>
-                  <td className="py-4 pr-4">
-                    <span className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-bold ${row.statusStyle}`}>
-                      {row.status}
-                    </span>
-                  </td>
-                  <td className="py-4 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        title="View details"
-                        className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
-                      >
-                        <Eye size={15} />
-                      </button>
-                      <button
-                        title="More options"
-                        className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
-                      >
-                        <MoreVertical size={15} />
-                      </button>
-                    </div>
+              {filteredReports.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-sm text-[#64748b]">
+                    No matching incident reports found.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredReports.map((row) => (
+                  <tr key={row.id} className="hover:bg-[#f8faf8] transition">
+                    <td className="py-4 pr-4 font-extrabold text-[#006b37]">
+                      {row.id}
+                    </td>
+                    <td className="py-4 pr-4">
+                      <div className="flex items-center gap-3">
+                        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${row.iconBg}`}>
+                          {row.icon ? (
+                            <img src={row.icon} alt={row.type} className="h-5 w-5 object-contain" />
+                          ) : (
+                            <row.lucideIcon size={18} className={row.lucideColor} />
+                          )}
+                        </span>
+                        <div>
+                          <div className="font-bold text-[#1e293b]">{row.type}</div>
+                          <div className="text-[11px] text-[#64748b]">{row.desc}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-4 pr-4">
+                      <div className="font-semibold text-[#1e293b]">{row.location}</div>
+                      <div className="text-[11px] text-[#64748b]">{row.subLocation}</div>
+                    </td>
+                    <td className="py-4 pr-4">
+                      <div className="font-semibold text-[#1e293b]">{row.reporter}</div>
+                      <div className="text-[11px] text-[#64748b]">{row.role}</div>
+                    </td>
+                    <td className="py-4 pr-4">
+                      <div className="text-[#334155]">{row.date}</div>
+                      <div className="text-[11px] text-[#64748b]">{row.time}</div>
+                    </td>
+                    <td className="py-4 pr-4">
+                      <span className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-bold ${row.statusStyle}`}>
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="py-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          title="View details"
+                          className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
+                        >
+                          <Eye size={15} />
+                        </button>
+                        <button
+                          title="More options"
+                          className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
+                        >
+                          <MoreVertical size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -1745,6 +1794,11 @@ function IncidentReportsPage() {
 }
 
 function SafeAnnouncementsPage() {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All Status");
+  const [typeFilter, setTypeFilter] = useState("All Types");
+  const [priorityFilter, setPriorityFilter] = useState("All Priority");
+
   const stats = [
     { label: "Total Announcements", value: "12", sub: "All time", icon: Megaphone, color: "text-[#10b981]", bg: "bg-[#ecfdf5]" },
     { label: "Published", value: "5", sub: "Active and visible", icon: Send, color: "text-[#2563eb]", bg: "bg-[#eff6ff]" },
@@ -1839,6 +1893,21 @@ function SafeAnnouncementsPage() {
     },
   ];
 
+  const filteredAnnouncements = announcements.filter((row) => {
+    const query = searchTerm.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      [row.title, row.desc, row.type, row.priority, row.status].some((value) =>
+        value.toLowerCase().includes(query)
+      );
+
+    const matchesStatus = statusFilter === "All Status" || row.status === statusFilter;
+    const matchesType = typeFilter === "All Types" || row.type === typeFilter;
+    const matchesPriority = priorityFilter === "All Priority" || row.priority === priorityFilter;
+
+    return matchesSearch && matchesStatus && matchesType && matchesPriority;
+  });
+
   return (
     <div className="space-y-6">
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
@@ -1867,18 +1936,28 @@ function SafeAnnouncementsPage() {
           <div className="flex flex-1 min-w-[220px] items-center gap-2 rounded-lg border border-[#dfe6e1] bg-white px-3.5 py-2 text-[#8b9690] shadow-sm">
             <Search size={16} className="text-[#64748b]" />
             <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-transparent text-xs outline-none placeholder:text-[#94a3b8]"
               placeholder="Search announcements..."
             />
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <select className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none"
+            >
               <option>All Status</option>
               <option>Published</option>
               <option>Scheduled</option>
               <option>Archived</option>
             </select>
-            <select className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none"
+            >
               <option>All Types</option>
               <option>Weather Advisory</option>
               <option>Safety Reminder</option>
@@ -1886,7 +1965,11 @@ function SafeAnnouncementsPage() {
               <option>Information</option>
               <option>Event</option>
             </select>
-            <select className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
+            <select
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value)}
+              className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none"
+            >
               <option>All Priority</option>
               <option>High</option>
               <option>Medium</option>
@@ -1911,65 +1994,73 @@ function SafeAnnouncementsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f0f3f1]">
-              {announcements.map((row, idx) => {
-                const IconComponent = row.icon;
-                const TypeIconComponent = row.typeIcon;
-                return (
-                  <tr key={idx} className="hover:bg-[#f8faf8] transition">
-                    <td className="py-4 pr-4">
-                      <div className="flex items-center gap-3 max-w-[420px]">
-                        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${row.iconBg}`}>
-                          {row.imgIcon ? (
-                            <img src={row.imgIcon} alt="" className="h-5 w-5 object-contain" />
-                          ) : (
-                            <IconComponent size={18} />
-                          )}
-                        </span>
-                        <div>
-                          <div className="font-bold text-[#1e293b]">{row.title}</div>
-                          <div className="text-[11px] text-[#64748b] line-clamp-2 leading-relaxed">{row.desc}</div>
+              {filteredAnnouncements.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-sm text-[#64748b]">
+                    No matching safety announcements found.
+                  </td>
+                </tr>
+              ) : (
+                filteredAnnouncements.map((row, idx) => {
+                  const IconComponent = row.icon;
+                  const TypeIconComponent = row.typeIcon;
+                  return (
+                    <tr key={idx} className="hover:bg-[#f8faf8] transition">
+                      <td className="py-4 pr-4">
+                        <div className="flex items-center gap-3 max-w-[420px]">
+                          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${row.iconBg}`}>
+                            {row.imgIcon ? (
+                              <img src={row.imgIcon} alt="" className="h-5 w-5 object-contain" />
+                            ) : (
+                              <IconComponent size={18} />
+                            )}
+                          </span>
+                          <div>
+                            <div className="font-bold text-[#1e293b]">{row.title}</div>
+                            <div className="text-[11px] text-[#64748b] line-clamp-2 leading-relaxed">{row.desc}</div>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="py-4 pr-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2 text-[#334155] font-medium">
-                        <TypeIconComponent size={15} className="text-[#64748b]" />
-                        <span>{row.type}</span>
-                      </div>
-                    </td>
-                    <td className="py-4 pr-4 whitespace-nowrap">
-                      <span className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-bold ${row.priorityStyle}`}>
-                        {row.priority}
-                      </span>
-                    </td>
-                    <td className="py-4 pr-4 whitespace-nowrap">
-                      <span className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-bold ${row.statusStyle}`}>
-                        {row.status}
-                      </span>
-                    </td>
-                    <td className="py-4 pr-4 whitespace-nowrap">
-                      <div className="text-[#334155]">{row.date}</div>
-                      <div className="text-[11px] text-[#64748b]">{row.time}</div>
-                    </td>
-                    <td className="py-4 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          title="View details"
-                          className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
-                        >
-                          <Eye size={15} />
-                        </button>
-                        <button
-                          title="More options"
-                          className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
-                        >
-                          <MoreVertical size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                      </td>
+                      <td className="py-4 pr-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2 text-[#334155] font-medium">
+                          <TypeIconComponent size={15} className="text-[#64748b]" />
+                          <span>{row.type}</span>
+                        </div>
+                      </td>
+                      <td className="py-4 pr-4 whitespace-nowrap">
+                        <span className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-bold ${row.priorityStyle}`}>
+                          {row.priority}
+                        </span>
+                      </td>
+                      <td className="py-4 pr-4 whitespace-nowrap">
+                        <span className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-bold ${row.statusStyle}`}>
+                          {row.status}
+                        </span>
+                      </td>
+                      <td className="py-4 pr-4 whitespace-nowrap">
+                        <div className="text-[#334155]">{row.date}</div>
+                        <div className="text-[11px] text-[#64748b]">{row.time}</div>
+                      </td>
+                      <td className="py-4 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            title="View details"
+                            className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
+                          >
+                            <Eye size={15} />
+                          </button>
+                          <button
+                            title="More options"
+                            className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
+                          >
+                            <MoreVertical size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -2397,7 +2488,6 @@ export default function Home() {
                   <span className="block text-sm font-bold text-[#111827]">BDRRMC Admin</span>
                   <span className="block text-xs text-[#64748b]">Administrator</span>
                 </span>
-                <ChevronDown size={16} className="text-[#64748b] ml-1" />
               </button>
             </div>
           </header>
