@@ -1,4 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  signInWithEmailAndPassword,
+  updatePassword,
+} from "firebase/auth";
 import {
   Activity,
   AlertTriangle,
@@ -48,6 +55,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { SectionPulseIcon } from "@/components/DashboardIcons";
+import { firebaseAuth } from "@/lib/firebase";
 
 const dashboardIcons = {
   warning: "/dashboard-icons/Warning.png",
@@ -2097,7 +2105,97 @@ function DataPage({ kind }) {
 
 function ProfilePage() { return <div className="max-w-2xl rounded-xl border border-[#e4e8e5] bg-white p-6"><div className="flex items-center gap-4 border-b border-[#edf0ed] pb-5"><div className="grid h-16 w-16 place-items-center rounded-full bg-[#e0f1e7] text-[#087442]"><UserRound size={28} /></div><div><h2 className="text-lg font-extrabold text-[#27352f]">BDRRMC Admin</h2><p className="text-xs text-[#7e8983]">Administrator · Barangay Malinao, Ormoc City</p></div></div><div className="mt-6 grid gap-4 sm:grid-cols-2"><label className="text-xs font-bold text-[#65746c]">Full name<input className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal outline-none focus:border-[#087442]" value="BDRRMC Admin" readOnly /></label><label className="text-xs font-bold text-[#65746c]">Email address<input className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal outline-none focus:border-[#087442]" value="admin@slopesense.demo" readOnly /></label></div><button className="mt-6 rounded-lg bg-[#087442] px-4 py-2.5 text-xs font-bold text-white">Save changes</button></div>; }
 
-function ReferenceProfilePage() {
+function ReferenceProfilePage({ profile, setProfile, preferences, setPreferences }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingPreferences, setSavingPreferences] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+
+  const handleProfileFieldChange = (field) => (event) => {
+    setProfile((previous) => ({ ...previous, [field]: event.target.value }));
+  };
+
+  const handleSaveProfile = () => {
+    setSavingProfile(true);
+    setTimeout(() => {
+      setSavingProfile(false);
+      setIsEditing(false);
+      setProfile((previous) => ({ ...previous, lastLogin: previous.lastLogin }));
+      toast.success("Profile updated", {
+        description: "Your account details have been saved.",
+      });
+    }, 250);
+  };
+
+  const handleTogglePreference = (key) => {
+    setPreferences((previous) => ({ ...previous, [key]: !previous[key] }));
+  };
+
+  const handleSavePreferences = () => {
+    setSavingPreferences(true);
+    setTimeout(() => {
+      setSavingPreferences(false);
+      toast.success("Notification preferences saved", {
+        description: "Your alert preferences were updated.",
+      });
+    }, 200);
+  };
+
+  const handleChangePassword = async (event) => {
+    event.preventDefault();
+
+    const user = firebaseAuth?.currentUser;
+
+    if (!user || !user.email) {
+      toast.error("You must be signed in to change the password.");
+      return;
+    }
+
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      toast.error("Complete all password fields");
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 6) {
+      toast.error("New password must be at least 6 characters");
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast.error("New passwords do not match");
+      return;
+    }
+
+    try {
+      const credential = EmailAuthProvider.credential(user.email, passwordForm.currentPassword);
+      await reauthenticateWithCredential(user, credential);
+      await updatePassword(user, passwordForm.newPassword);
+
+      toast.success("Password updated", {
+        description: "Your admin password has been changed successfully.",
+      });
+
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setPasswordModalOpen(false);
+    } catch (error) {
+      const message =
+        error?.code === "auth/wrong-password"
+          ? "Your current password is incorrect."
+          : error?.code === "auth/requires-recent-login"
+            ? "Please sign in again before changing the password."
+            : error?.message || "Unable to update the password.";
+
+      toast.error("Password change failed", {
+        description: message,
+      });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <section className="grid gap-6 rounded-xl border border-[#dfe7e1] bg-white p-6 shadow-[0_4px_14px_rgba(20,61,42,0.03)] md:grid-cols-[1.1fr_1fr]">
@@ -2107,38 +2205,118 @@ function ReferenceProfilePage() {
           </div>
           <div>
             <div className="flex items-center gap-2.5">
-              <h2 className="text-xl font-extrabold text-[#1e293b]">BDRRMC Admin</h2>
-              <span className="rounded-md bg-[#e4f5e9] px-2.5 py-1 text-xs font-bold text-[#15803d]">Administrator</span>
+              <h2 className="text-xl font-extrabold text-[#1e293b]">{profile.fullName}</h2>
+              <span className="rounded-md bg-[#e4f5e9] px-2.5 py-1 text-xs font-bold text-[#15803d]">{profile.role}</span>
             </div>
             <p className="mt-1 text-xs font-medium text-[#64748b]">Barangay Disaster Risk Reduction and Management Committee</p>
             <div className="mt-3 space-y-1 text-xs font-semibold text-[#475569]">
-              <div>admin@malinao.gov.ph</div>
-              <div>0917 123 4567</div>
+              <div>{profile.email}</div>
+              <div>{profile.phone}</div>
             </div>
           </div>
         </div>
         <div className="relative pt-1">
-          <button className="absolute right-0 top-0 rounded-lg border border-[#dfe7e1] bg-white px-3.5 py-2 text-xs font-bold text-[#334155] shadow-sm hover:bg-slate-50 transition">
-            Edit Profile
+          <button
+            type="button"
+            onClick={() => setIsEditing((current) => !current)}
+            className="absolute right-0 top-0 rounded-lg border border-[#dfe7e1] bg-white px-3.5 py-2 text-xs font-bold text-[#334155] shadow-sm hover:bg-slate-50 transition"
+          >
+            {isEditing ? "Cancel" : "Edit Profile"}
           </button>
           <dl className="grid grid-cols-[130px_1fr] gap-x-4 gap-y-2.5 pr-28 text-xs">
             <dt className="font-medium text-[#64748b]">Account ID</dt>
             <dd className="font-bold text-[#1e293b]">BDRRMC-ADMIN-001</dd>
             <dt className="font-medium text-[#64748b]">Role</dt>
-            <dd className="font-bold text-[#1e293b]">Administrator</dd>
+            <dd className="font-bold text-[#1e293b]">{profile.role}</dd>
             <dt className="font-medium text-[#64748b]">Office / Position</dt>
-            <dd className="font-bold text-[#1e293b]">BDRRMC Administrator</dd>
+            <dd className="font-bold text-[#1e293b]">{profile.office}</dd>
             <dt className="font-medium text-[#64748b]">Barangay</dt>
-            <dd className="font-bold text-[#1e293b]">Malinao</dd>
+            <dd className="font-bold text-[#1e293b]">{profile.barangay}</dd>
             <dt className="font-medium text-[#64748b]">Municipality / City</dt>
-            <dd className="font-bold text-[#1e293b]">Ormoc City</dd>
+            <dd className="font-bold text-[#1e293b]">{profile.city}</dd>
             <dt className="font-medium text-[#64748b]">Member Since</dt>
-            <dd className="font-bold text-[#1e293b]">May 12, 2025 08:15 AM</dd>
+            <dd className="font-bold text-[#1e293b]">{profile.memberSince}</dd>
             <dt className="font-medium text-[#64748b]">Last Login</dt>
-            <dd className="font-bold text-[#1e293b]">May 27, 2025 10:42 AM</dd>
+            <dd className="font-bold text-[#1e293b]">{profile.lastLogin}</dd>
           </dl>
         </div>
       </section>
+
+      {isEditing && (
+        <section className="rounded-xl border border-[#dfe7e1] bg-white p-6 shadow-[0_4px_14px_rgba(20,61,42,0.03)]">
+          <div className="mb-4 border-b border-[#edf0ed] pb-3.5">
+            <h3 className="text-base font-extrabold text-[#15803d]">Edit Profile</h3>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="text-xs font-bold text-[#65746c]">
+              Full name
+              <input
+                className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal text-[#1e293b] outline-none focus:border-[#087442]"
+                value={profile.fullName}
+                onChange={handleProfileFieldChange("fullName")}
+              />
+            </label>
+            <label className="text-xs font-bold text-[#65746c]">
+              Email address
+              <input
+                className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal text-[#1e293b] outline-none focus:border-[#087442]"
+                value={profile.email}
+                onChange={handleProfileFieldChange("email")}
+              />
+            </label>
+            <label className="text-xs font-bold text-[#65746c]">
+              Phone number
+              <input
+                className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal text-[#1e293b] outline-none focus:border-[#087442]"
+                value={profile.phone}
+                onChange={handleProfileFieldChange("phone")}
+              />
+            </label>
+            <label className="text-xs font-bold text-[#65746c]">
+              Role
+              <input
+                className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal text-[#1e293b] outline-none focus:border-[#087442]"
+                value={profile.role}
+                onChange={handleProfileFieldChange("role")}
+              />
+            </label>
+            <label className="text-xs font-bold text-[#65746c]">
+              Office / Position
+              <input
+                className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal text-[#1e293b] outline-none focus:border-[#087442]"
+                value={profile.office}
+                onChange={handleProfileFieldChange("office")}
+              />
+            </label>
+            <label className="text-xs font-bold text-[#65746c]">
+              Barangay
+              <input
+                className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal text-[#1e293b] outline-none focus:border-[#087442]"
+                value={profile.barangay}
+                onChange={handleProfileFieldChange("barangay")}
+              />
+            </label>
+            <label className="text-xs font-bold text-[#65746c]">
+              Municipality / City
+              <input
+                className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal text-[#1e293b] outline-none focus:border-[#087442]"
+                value={profile.city}
+                onChange={handleProfileFieldChange("city")}
+              />
+            </label>
+          </div>
+          <div className="mt-6 flex justify-end">
+            <button
+              type="button"
+              onClick={handleSaveProfile}
+              disabled={savingProfile}
+              className="rounded-lg bg-[#087442] px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#065e35] transition disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {savingProfile ? "Saving..." : "Save changes"}
+            </button>
+          </div>
+        </section>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_1fr]">
         <div className="space-y-6">
@@ -2151,7 +2329,13 @@ function ReferenceProfilePage() {
               <div className="flex items-center justify-between border-b border-[#f1f5f9] pb-3">
                 <span className="font-bold text-[#334155]">Password</span>
                 <span className="font-mono text-[#64748b]">••••••••</span>
-                <button className="rounded-lg border border-[#dfe7e1] bg-white px-3 py-1.5 text-xs font-bold text-[#334155] hover:bg-slate-50 transition">Change Password</button>
+                <button
+                  type="button"
+                  onClick={() => setPasswordModalOpen(true)}
+                  className="rounded-lg border border-[#dfe7e1] bg-white px-3 py-1.5 text-xs font-bold text-[#334155] hover:bg-slate-50 transition"
+                >
+                  Change Password
+                </button>
               </div>
               <div className="flex items-center justify-between border-b border-[#f1f5f9] pb-3">
                 <div>
@@ -2165,7 +2349,9 @@ function ReferenceProfilePage() {
                   <span className="block font-bold text-[#334155]">Active Sessions</span>
                   <span className="text-[11px] text-[#64748b]">Manage your active sessions</span>
                 </div>
-                <button className="rounded-lg border border-[#dfe7e1] bg-white px-3 py-1.5 text-xs font-bold text-[#334155] hover:bg-slate-50 transition">Manage Sessions</button>
+                <button className="rounded-lg border border-[#dfe7e1] bg-white px-3 py-1.5 text-xs font-bold text-[#334155] hover:bg-slate-50 transition">
+                  Manage Sessions
+                </button>
               </div>
             </div>
           </section>
@@ -2185,10 +2371,10 @@ function ReferenceProfilePage() {
                 </thead>
                 <tbody className="divide-y divide-[#f1f5f9]">
                   {[
-                    ["May 27, 2025 10:42 AM","Login","Successful login","192.168.1.10"],
-                    ["May 27, 2025 09:15 AM","Viewed Reports","Incident list viewed","192.168.1.10"],
-                    ["May 26, 2025 04:30 PM","Created Announcement","Heavy Rainfall Advisory","192.168.1.12"],
-                    ["May 26, 2025 02:10 PM","Updated Profile","Profile information updated","192.168.1.12"]
+                    ["May 27, 2025 10:42 AM", "Login", "Successful login", "192.168.1.10"],
+                    ["May 27, 2025 09:15 AM", "Viewed Reports", "Incident list viewed", "192.168.1.10"],
+                    ["May 26, 2025 04:30 PM", "Created Announcement", "Heavy Rainfall Advisory", "192.168.1.12"],
+                    ["May 26, 2025 02:10 PM", "Updated Profile", "Profile information updated", "192.168.1.12"],
                   ].map((row) => (
                     <tr key={row[0]} className="text-xs text-[#475569]">
                       <td className="py-2.5 pr-3 whitespace-nowrap">{row[0]}</td>
@@ -2212,29 +2398,110 @@ function ReferenceProfilePage() {
             <p className="mt-1 text-xs text-[#64748b]">Choose how you want to receive notifications.</p>
             <div className="mt-5 space-y-4">
               {[
-                ["System Alerts","Critical alerts from the slope monitoring system",true],
-                ["Incident Updates","Updates on incident reports and their status",true],
-                ["Safety Announcements","New safety announcements and advisories",true],
-                ["System Maintenance","Notifications about system maintenance",false],
-                ["Weekly Reports","Receive weekly summary reports",false]
-              ].map(([name, detail, active]) => (
-                <div key={name} className="flex items-center justify-between py-1">
+                ["System Alerts", "Critical alerts from the slope monitoring system", "systemAlerts"],
+                ["Incident Updates", "Updates on incident reports and their status", "incidentUpdates"],
+                ["Safety Announcements", "New safety announcements and advisories", "safetyAnnouncements"],
+                ["System Maintenance", "Notifications about system maintenance", "systemMaintenance"],
+                ["Weekly Reports", "Receive weekly summary reports", "weeklyReports"],
+              ].map(([name, detail, key]) => (
+                <div key={key} className="flex items-center justify-between py-1">
                   <div>
                     <div className="text-xs font-extrabold text-[#1e293b]">{name}</div>
                     <div className="mt-0.5 text-[11px] text-[#64748b]">{detail}</div>
                   </div>
-                  <span className={`relative h-5 w-10 shrink-0 cursor-pointer rounded-full transition ${active ? "bg-[#087442]" : "bg-[#cbd5e1]"}`}>
-                    <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all shadow-sm ${active ? "right-0.5" : "left-0.5"}`} />
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleTogglePreference(key)}
+                    aria-label={`Toggle ${name}`}
+                    className={`relative h-5 w-10 shrink-0 cursor-pointer rounded-full transition ${preferences[key] ? "bg-[#087442]" : "bg-[#cbd5e1]"}`}
+                  >
+                    <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all shadow-sm ${preferences[key] ? "right-0.5" : "left-0.5"}`} />
+                  </button>
                 </div>
               ))}
             </div>
           </div>
-          <button className="mt-8 rounded-lg bg-[#087442] px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#065e35] transition self-start">
-            Save Preferences
+          <button
+            type="button"
+            onClick={handleSavePreferences}
+            disabled={savingPreferences}
+            className="mt-8 rounded-lg bg-[#087442] px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#065e35] transition self-start disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {savingPreferences ? "Saving..." : "Save Preferences"}
           </button>
         </section>
       </div>
+
+      {passwordModalOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#143a28]/35 px-4" role="presentation">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="password-change-title"
+            className="w-full max-w-md rounded-xl border border-[#dfe7e1] bg-white p-6 shadow-[0_20px_50px_rgba(20,61,42,0.2)]"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="password-change-title" className="text-lg font-extrabold text-[#1e293b]">Change Password</h2>
+                <p className="mt-1 text-xs text-[#64748b]">Update your admin password securely.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPasswordModalOpen(false)}
+                className="rounded-lg border border-[#dfe7e1] bg-white px-2 py-1 text-xs font-bold text-[#334155] hover:bg-slate-50 transition"
+              >
+                Close
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePassword} className="mt-5 space-y-4">
+              <label className="block text-xs font-bold text-[#334155]">
+                Current password
+                <input
+                  type="password"
+                  value={passwordForm.currentPassword}
+                  onChange={(event) => setPasswordForm((previous) => ({ ...previous, currentPassword: event.target.value }))}
+                  className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal text-[#1e293b] outline-none focus:border-[#087442]"
+                />
+              </label>
+              <label className="block text-xs font-bold text-[#334155]">
+                New password
+                <input
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={(event) => setPasswordForm((previous) => ({ ...previous, newPassword: event.target.value }))}
+                  className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal text-[#1e293b] outline-none focus:border-[#087442]"
+                />
+              </label>
+              <label className="block text-xs font-bold text-[#334155]">
+                Confirm new password
+                <input
+                  type="password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(event) => setPasswordForm((previous) => ({ ...previous, confirmPassword: event.target.value }))}
+                  className="mt-2 w-full rounded-lg border border-[#dce4df] px-3 py-2.5 text-sm font-normal text-[#1e293b] outline-none focus:border-[#087442]"
+                />
+              </label>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPasswordModalOpen(false)}
+                  className="rounded-lg border border-[#dfe7e1] bg-white px-4 py-2 text-xs font-bold text-[#334155] hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-[#087442] px-4 py-2 text-xs font-bold text-white hover:bg-[#065e35] transition"
+                >
+                  Save Password
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2313,6 +2580,59 @@ function Sidebar({ page, setPage, open, setOpen, onLogout }) {
 
 function Login({ onEnter }) {
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState(() => localStorage.getItem("slopesense-remember-email") || "");
+  const [password, setPassword] = useState(() => localStorage.getItem("slopesense-remember-password") || "");
+  const [rememberMe, setRememberMe] = useState(() => localStorage.getItem("slopesense-remember-enabled") === "true");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (rememberMe) {
+      localStorage.setItem("slopesense-remember-email", email);
+      localStorage.setItem("slopesense-remember-enabled", "true");
+    } else {
+      localStorage.removeItem("slopesense-remember-email");
+      localStorage.removeItem("slopesense-remember-enabled");
+    }
+  }, [email, rememberMe]);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!firebaseAuth) {
+      toast.error("Firebase Auth is not configured", {
+        description: "Add your Firebase credentials to the project .env file first.",
+      });
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await signInWithEmailAndPassword(firebaseAuth, email.trim(), password);
+
+      if (rememberMe) {
+        localStorage.setItem("slopesense-remember-email", email.trim());
+        localStorage.setItem("slopesense-remember-password", password);
+        localStorage.setItem("slopesense-remember-enabled", "true");
+      } else {
+        localStorage.removeItem("slopesense-remember-email");
+        localStorage.removeItem("slopesense-remember-password");
+        localStorage.removeItem("slopesense-remember-enabled");
+      }
+
+      onEnter();
+    } catch (error) {
+      const message =
+        error?.code === "auth/invalid-credential"
+          ? "Invalid admin email or password."
+          : error?.message || "Unable to sign in with Firebase.";
+
+      toast.error("Admin login failed", {
+        description: message,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <main className="login-reference-scene min-h-screen bg-white">
@@ -2334,10 +2654,7 @@ function Login({ onEnter }) {
         <div className="relative flex items-center justify-center px-6 py-12 lg:px-16">
           <form
             className="relative z-10 w-full max-w-[460px] rounded-2xl border border-[#dfe7e1] bg-white/95 p-8 sm:p-10 shadow-[0_20px_50px_rgba(0,107,55,0.06)] backdrop-blur-sm"
-            onSubmit={(event) => {
-              event.preventDefault();
-              onEnter();
-            }}
+            onSubmit={handleSubmit}
           >
             <h1 className="text-center text-3xl font-extrabold tracking-tight text-[#006b37]">
               Welcome Back!
@@ -2355,6 +2672,8 @@ function Login({ onEnter }) {
                     className="min-w-0 flex-1 bg-transparent px-3 text-sm font-normal text-[#1e293b] outline-none placeholder:text-[#94a3b8]"
                     placeholder="Enter your email"
                     type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
                     required
                   />
                 </span>
@@ -2368,6 +2687,8 @@ function Login({ onEnter }) {
                     className="min-w-0 flex-1 bg-transparent px-3 text-sm font-normal text-[#1e293b] outline-none placeholder:text-[#94a3b8]"
                     placeholder="Enter your password"
                     type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
                     required
                   />
                   <button
@@ -2385,6 +2706,8 @@ function Login({ onEnter }) {
                 <label className="flex items-center gap-2 text-[#475569] font-medium cursor-pointer">
                   <input
                     type="checkbox"
+                    checked={rememberMe}
+                    onChange={(event) => setRememberMe(event.target.checked)}
                     className="h-4 w-4 rounded border-[#cbd5e1] accent-[#006b37] cursor-pointer"
                   />
                   Remember me
@@ -2396,10 +2719,11 @@ function Login({ onEnter }) {
 
               <button
                 type="submit"
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#005c2e] text-base font-bold text-white shadow-md hover:bg-[#004724] transition active:scale-[0.99]"
+                disabled={isSubmitting}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#005c2e] text-base font-bold text-white shadow-md hover:bg-[#004724] transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70"
               >
                 <LogIn size={19} />
-                Log In
+                {isSubmitting ? "Signing in..." : "Log In"}
               </button>
             </div>
 
@@ -2420,11 +2744,55 @@ function Login({ onEnter }) {
 }
 
 export default function Home() {
+  const defaultProfile = {
+    fullName: "BDRRMC Admin",
+    email: "fiftydollbro@gmail.com",
+    phone: "0917 123 4567",
+    role: "Administrator",
+    office: "BDRRMC Administrator",
+    barangay: "Malinao",
+    city: "Ormoc City",
+    memberSince: "May 12, 2025 08:15 AM",
+    lastLogin: "May 27, 2025 10:42 AM",
+  };
+
+  const defaultPreferences = {
+    systemAlerts: true,
+    incidentUpdates: true,
+    safetyAnnouncements: true,
+    systemMaintenance: false,
+    weeklyReports: false,
+  };
+
   const [page, setPage] = useState(() => window.location.hash.replace("#", "") || "dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
   const [markAllAlertsTrigger, setMarkAllAlertsTrigger] = useState(0);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [profile, setProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem("slopesense-profile");
+      return saved ? JSON.parse(saved) : defaultProfile;
+    } catch {
+      return defaultProfile;
+    }
+  });
+  const [preferences, setPreferences] = useState(() => {
+    try {
+      const saved = localStorage.getItem("slopesense-notifications");
+      return saved ? JSON.parse(saved) : defaultPreferences;
+    } catch {
+      return defaultPreferences;
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("slopesense-profile", JSON.stringify(profile));
+  }, [profile]);
+
+  useEffect(() => {
+    localStorage.setItem("slopesense-notifications", JSON.stringify(preferences));
+  }, [preferences]);
 
   if (page === "login") return <Login onEnter={() => setPage("dashboard")} />;
   const [title, subtitle] = pageMeta[page];
@@ -2485,59 +2853,70 @@ export default function Home() {
                   <UserRound size={20} />
                 </span>
                 <span className="hidden sm:block leading-tight">
-                  <span className="block text-sm font-bold text-[#111827]">BDRRMC Admin</span>
-                  <span className="block text-xs text-[#64748b]">Administrator</span>
+                  <span className="block text-sm font-bold text-[#111827]">{profile.fullName || "BDRRMC Admin"}</span>
+                  <span className="block text-xs text-[#64748b]">{profile.role || "Administrator"}</span>
                 </span>
               </button>
             </div>
           </header>
           <main className="p-6 md:p-8">
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#111827]">{title}</h1>
-                <p className="mt-1 text-xs text-[#64748b]">{subtitle}</p>
-              </div>
-              {page === "alerts" && (
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setAlertSettingsOpen(true)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[#dfe7e1] bg-white px-3.5 py-2 text-xs font-bold text-[#1f2937] shadow-sm hover:bg-slate-50 transition"
-                  >
-                    <Settings size={15} className="text-[#475569]" />
-                    Alert Settings
-                  </button>
-                  <button
-                    onClick={() => setMarkAllAlertsTrigger((c) => c + 1)}
-                    className="inline-flex items-center gap-2 rounded-lg bg-[#006b37] px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-[#00522a] transition"
-                  >
-                    <Mail size={15} className="text-white" />
-                    Mark All as Read
-                  </button>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={page}
+                initial={{ opacity: 0, y: 16, filter: "blur(4px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, y: -12, filter: "blur(4px)" }}
+                transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                className="min-h-[calc(100vh-160px)]"
+              >
+                <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#111827]">{title}</h1>
+                    <p className="mt-1 text-xs text-[#64748b]">{subtitle}</p>
+                  </div>
+                  {page === "alerts" && (
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setAlertSettingsOpen(true)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-[#dfe7e1] bg-white px-3.5 py-2 text-xs font-bold text-[#1f2937] shadow-sm hover:bg-slate-50 transition"
+                      >
+                        <Settings size={15} className="text-[#475569]" />
+                        Alert Settings
+                      </button>
+                      <button
+                        onClick={() => setMarkAllAlertsTrigger((c) => c + 1)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-[#006b37] px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-[#00522a] transition"
+                      >
+                        <Mail size={15} className="text-white" />
+                        Mark All as Read
+                      </button>
+                    </div>
+                  )}
+                  {page === "incidents" && (
+                    <button className="rounded-lg bg-[#087442] px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#065e35] transition">
+                      + New Incident Report
+                    </button>
+                  )}
+                  {page === "announcements" && (
+                    <button className="rounded-lg bg-[#087442] px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#065e35] transition">
+                      + New Announcement
+                    </button>
+                  )}
                 </div>
-              )}
-              {page === "incidents" && (
-                <button className="rounded-lg bg-[#087442] px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#065e35] transition">
-                  + New Incident Report
-                </button>
-              )}
-              {page === "announcements" && (
-                <button className="rounded-lg bg-[#087442] px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#065e35] transition">
-                  + New Announcement
-                </button>
-              )}
-            </div>
-            {page === "dashboard" && <DashboardOverview setPage={setPage} />}
-            {page === "sensors" && <SensorsPage />}
-            {page === "alerts" && (
-              <AlertsPage
-                openSettings={alertSettingsOpen}
-                setOpenSettings={setAlertSettingsOpen}
-                markAllTrigger={markAllAlertsTrigger}
-              />
-            )}
-            {page === "incidents" && <IncidentReportsPage />}
-            {page === "announcements" && <SafeAnnouncementsPage />}
-            {page === "profile" && <ReferenceProfilePage />}
+                {page === "dashboard" && <DashboardOverview setPage={setPage} />}
+                {page === "sensors" && <SensorsPage />}
+                {page === "alerts" && (
+                  <AlertsPage
+                    openSettings={alertSettingsOpen}
+                    setOpenSettings={setAlertSettingsOpen}
+                    markAllTrigger={markAllAlertsTrigger}
+                  />
+                )}
+                {page === "incidents" && <IncidentReportsPage />}
+                {page === "announcements" && <SafeAnnouncementsPage />}
+                {page === "profile" && <ReferenceProfilePage profile={profile} setProfile={setProfile} preferences={preferences} setPreferences={setPreferences} />}
+              </motion.div>
+            </AnimatePresence>
           </main>
         </div>
       </div>
@@ -2569,6 +2948,12 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => {
+                  const rememberEnabled = localStorage.getItem("slopesense-remember") === "true";
+                  if (!rememberEnabled) {
+                    localStorage.removeItem("slopesense-remembered-email");
+                    localStorage.removeItem("slopesense-remembered-password");
+                  }
+
                   setLogoutConfirmOpen(false);
                   setPage("login");
                 }}
