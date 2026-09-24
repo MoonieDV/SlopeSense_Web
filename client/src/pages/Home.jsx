@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   EmailAuthProvider,
   reauthenticateWithCredential,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   updatePassword,
 } from "firebase/auth";
@@ -11,6 +12,7 @@ import {
   AlertTriangle,
   Archive,
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
   Bell,
   Calendar,
@@ -43,6 +45,7 @@ import {
   Settings,
   Shield,
   ShieldCheck,
+  Trash2,
   UserCheck,
   UserRound,
   Users,
@@ -54,8 +57,9 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import { onValue, push, ref as dbRef, set } from "firebase/database";
 import { SectionPulseIcon } from "@/components/DashboardIcons";
-import { firebaseAuth } from "@/lib/firebase";
+import { firebaseAuth, firebaseDatabase } from "@/lib/firebase";
 
 const dashboardIcons = {
   warning: "/dashboard-icons/Warning.png",
@@ -72,26 +76,151 @@ const dashboardIcons = {
   alertResolved: "/dashboard-icons/alert-resolved.png",
 };
 
-const sensorData = [
-  { id: "soil", name: "SOIL MOISTURE", code: "(Capacitive Sensor)", value: "72%", detail: "Moisture Level", state: "WARNING", tone: "green", trend: "Increasing", icon: Droplet },
-  { id: "rain", name: "RAIN (YL-83)", code: "", value: "RAIN DETECTED", reading: "2,740", detail: "Sensor Reading (ADC)", state: "WARNING", tone: "blue", icon: CloudRain },
-  { id: "tilt", name: "TILT (SW-520D)", code: "", value: "STABLE", detail: "No tilt detected", state: "NORMAL", tone: "purple", icon: TriangleAlert },
-  { id: "vibration", name: "VIBRATION (SW-420)", code: "", value: "NO VIBRATION", detail: "No vibration detected", state: "NORMAL", tone: "red", icon: Activity },
-];
+const buildSensorData = (liveSensors = {}) => {
+  const soil = liveSensors.soil ?? {};
+  const rain = liveSensors.rain ?? {};
+  const soilMoisture = Number(soil.moisturePercent ?? 33);
+  const rainADC = Number(rain.rawValue ?? 0);
+  const soilWarning = soilMoisture >= 70;
+  const rainWarning = Number(rainADC) > 0 || String(rain.level ?? "").toLowerCase() !== "dry";
 
-const monitoringSensorData = [
-  { id: "soil", name: "SOIL MOISTURE", code: "Capacitive Sensor", value: "72%", detail: "Moisture Level", state: "WARNING", tone: "green", updated: "10:42:05 AM" },
-  { id: "rain", name: "RAIN (YL-83)", code: "ADC Reading", value: "2,740", detail: "Rain Detected (ADC)", state: "WARNING", tone: "blue", updated: "10:42:05 AM" },
-  { id: "tilt", name: "TILT (SW-520D)", code: "Detection", value: "STABLE", detail: "No tilt detected", state: "NORMAL", tone: "purple", updated: "10:41:36 AM" },
-  { id: "vibration", name: "VIBRATION (SW-420)", code: "Detection", value: "NO VIBRATION", detail: "No vibration detected", state: "NORMAL", tone: "red", updated: "10:42:05 AM" },
-];
+  return [
+    {
+      id: "soil",
+      name: "SOIL MOISTURE",
+      code: "(Capacitive Sensor)",
+      value: `${soilMoisture}%`,
+      detail: soilWarning ? "Moisture Level High" : "Moisture Level",
+      state: soilWarning ? "WARNING" : "NORMAL",
+      tone: "green",
+      trend: soilWarning ? "Increasing" : "Stable",
+      icon: Droplet,
+    },
+    {
+      id: "rain",
+      name: "RAIN (YL-83)",
+      code: "",
+      value: rainWarning ? "RAIN DETECTED" : "NO RAIN",
+      reading: `${rainADC}`,
+      detail: rainWarning ? "Sensor Reading (ADC)" : "Sensor Reading (ADC)",
+      state: rainWarning ? "WARNING" : "NORMAL",
+      tone: "blue",
+      icon: CloudRain,
+    },
+    {
+      id: "tilt",
+      name: "TILT (SW-520D)",
+      code: "",
+      value: "STABLE",
+      detail: "No tilt detected",
+      state: "NORMAL",
+      tone: "purple",
+      icon: TriangleAlert,
+    },
+    {
+      id: "vibration",
+      name: "VIBRATION (SW-420)",
+      code: "",
+      value: "NO VIBRATION",
+      detail: "No vibration detected",
+      state: "NORMAL",
+      tone: "red",
+      icon: Activity,
+    },
+  ];
+};
 
-const recentSensorReadings = [
-  { time: "May 27, 2025 10:42:05 AM", sensor: "Soil Moisture (Capacitive)", reading: "72%", status: "Above threshold", condition: "WARNING" },
-  { time: "May 27, 2025 10:42:05 AM", sensor: "Rain (YL-83)", reading: "2,740 (ADC)", status: "Rain detected", condition: "WARNING" },
-  { time: "May 27, 2025 10:42:05 AM", sensor: "Tilt (SW-520D)", reading: "0 (Stable)", status: "No tilt detected", condition: "NORMAL" },
-  { time: "May 27, 2025 10:42:05 AM", sensor: "Vibration (SW-420)", reading: "0 (No Vibration)", status: "No vibration detected", condition: "NORMAL" },
-];
+const buildMonitoringSensorData = (liveSensors = {}) => {
+  const soil = liveSensors.soil ?? {};
+  const rain = liveSensors.rain ?? {};
+  const soilMoisture = Number(soil.moisturePercent ?? 33);
+  const rainADC = Number(rain.rawValue ?? 0);
+  const soilWarning = soilMoisture >= 70;
+  const rainWarning = Number(rainADC) > 0 || String(rain.level ?? "").toLowerCase() !== "dry";
+
+  return [
+    {
+      id: "soil",
+      name: "SOIL MOISTURE",
+      code: "Capacitive Sensor",
+      value: `${soilMoisture}%`,
+      detail: soilWarning ? "Moisture Level High" : "Moisture Level",
+      state: soilWarning ? "WARNING" : "NORMAL",
+      tone: "green",
+      updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
+    },
+    {
+      id: "rain",
+      name: "RAIN (YL-83)",
+      code: "ADC Reading",
+      value: rainWarning ? `${rainADC}` : "0",
+      detail: rainWarning ? "Rain Detected (ADC)" : "Dry / No Rain",
+      state: rainWarning ? "WARNING" : "NORMAL",
+      tone: "blue",
+      updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
+    },
+    {
+      id: "tilt",
+      name: "TILT (SW-520D)",
+      code: "Detection",
+      value: "STABLE",
+      detail: "No tilt detected",
+      state: "NORMAL",
+      tone: "purple",
+      updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
+    },
+    {
+      id: "vibration",
+      name: "VIBRATION (SW-420)",
+      code: "Detection",
+      value: "NO VIBRATION",
+      detail: "No vibration detected",
+      state: "NORMAL",
+      tone: "red",
+      updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
+    },
+  ];
+};
+
+const buildRecentReadings = (liveSensors = {}) => {
+  const soil = liveSensors.soil ?? {};
+  const rain = liveSensors.rain ?? {};
+  const soilMoisture = Number(soil.moisturePercent ?? 33);
+  const rainADC = Number(rain.rawValue ?? 0);
+  const rainWarning = Number(rainADC) > 0 || String(rain.level ?? "").toLowerCase() !== "dry";
+  const soilWarning = soilMoisture >= 70;
+
+  return [
+    {
+      time: new Date().toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }),
+      sensor: "Soil Moisture (Capacitive)",
+      reading: `${soilMoisture}%`,
+      status: soilWarning ? "Above threshold" : "Within threshold",
+      condition: soilWarning ? "WARNING" : "NORMAL",
+    },
+    {
+      time: new Date().toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }),
+      sensor: "Rain (YL-83)",
+      reading: `${rainADC} (ADC)`,
+      status: rainWarning ? "Rain detected" : "No rainfall",
+      condition: rainWarning ? "WARNING" : "NORMAL",
+    },
+    {
+      time: new Date().toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }),
+      sensor: "Tilt (SW-520D)",
+      reading: "0 (Stable)",
+      status: "No tilt detected",
+      condition: "NORMAL",
+    },
+    {
+      time: new Date().toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }),
+      sensor: "Vibration (SW-420)",
+      reading: "0 (No Vibration)",
+      status: "No vibration detected",
+      condition: "NORMAL",
+    },
+  ];
+};
 
 const pageMeta = {
   dashboard: ["Dashboard Overview", "Real-time overview of slope conditions and recent activities."],
@@ -403,16 +532,18 @@ function MonitoringSensorCard({ sensor }) {
 }
 
 
-function DashboardOverview({ setPage }) {
+function DashboardOverview({ setPage, sensorData, activeAlertCount = 0 }) {
+  const alertLevel = activeAlertCount > 0 ? "WARNING" : "NORMAL";
+
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
         <MetricCard
           customIcon={<img src={dashboardIcons.warning} alt="Current Alert Level" className="h-12 w-12 shrink-0 object-contain" />}
-          tone="amber"
+          tone={alertLevel === "WARNING" ? "amber" : "green"}
           label="Current Alert Level"
-          value="WARNING"
-          sub="Conditions are becoming concerning. Please monitor closely."
+          value={alertLevel}
+          sub={alertLevel === "WARNING" ? "Conditions are becoming concerning. Please monitor closely." : "No active sensor warning detected."}
           action="View Details"
         />
         <MetricCard
@@ -423,8 +554,8 @@ function DashboardOverview({ setPage }) {
           }
           tone="red"
           label="Active Alerts"
-          value="2"
-          sub="Warning Level Alerts"
+          value={String(activeAlertCount)}
+          sub={activeAlertCount > 0 ? "Warning Level Alerts" : "No current alerts"}
           action="View Alerts"
         />
         <MetricCard
@@ -704,7 +835,7 @@ function ReferenceChart({ type }) {
   );
 }
 
-function SensorsPage() {
+function SensorsPage({ monitoringSensorData = [], recentSensorReadings = [] }) {
   const [selectedSensor, setSelectedSensor] = useState("All Sensors");
   const [activeTimeRange, setActiveTimeRange] = useState("24H");
 
@@ -825,85 +956,76 @@ function MiniChart({ title, color, values, value }) {
   return <div><div className="flex items-start justify-between gap-2"><div><div className="text-[0.63rem] font-extrabold uppercase text-[#53635a]">{title}</div><div className="mt-1 text-[0.58rem] text-[#9aa39e]">Last 24 hours</div></div><div className="text-[0.72rem] font-extrabold" style={{ color }}>{value}</div></div><div className="mt-4 flex h-[100px] items-end gap-1 border-b border-l border-[#e5ebe6] px-2 pb-0 pt-3">{values.map((height, index) => <div key={index} className="flex-1 rounded-t-sm opacity-85" style={{ height: `${height}%`, backgroundColor: color }} />)}</div><div className="mt-2 flex justify-between text-[0.52rem] text-[#a3aca7]"><span>10:00 AM</span><span>4:00 PM</span><span>4:00 AM</span></div></div>;
 }
 
-const alertRows = [["High Soil Moisture Detected", "Device 02 / Soil Moisture Sensor", "Zone 2 · Brgy. Sto. Niño", "CRITICAL", "New", "10:35 AM", "red"], ["Heavy Rainfall Detected", "Device 01 / Rainfall Sensor", "Zone 1 · Brgy. Central", "CRITICAL", "New", "10:18 AM", "red"], ["Tilt Threshold Exceeded", "Device 03 / Tilt Sensor", "Zone 3 · Brgy. Riverside", "WARNING", "In Progress", "09:55 AM", "amber"], ["Vibration Detected", "Device 04 / Vibration Sensor", "Zone 4 · Brgy. San Isidro", "WARNING", "New", "09:41 AM", "amber"], ["Device Reconnected", "Device 05 / Soil Moisture Sensor", "Zone 2", "INFO", "Resolved", "08:30 AM", "blue"]];
-function AlertsPage({ openSettings, setOpenSettings, markAllTrigger }) {
-  const [alerts, setAlerts] = useState([
-    {
-      id: "ALT-001",
+function buildLiveAlertsFromSensors(liveSensors = {}) {
+  const soil = liveSensors.soil ?? {};
+  const rain = liveSensors.rain ?? {};
+  const soilMoisture = Number(soil.moisturePercent ?? 0);
+  const rainRaw = Number(rain.rawValue ?? 0);
+  const rainLevel = String(rain.level ?? "DRY").toUpperCase();
+  const soilTriggered = soilMoisture >= 70;
+  const rainTriggered = rainRaw > 0 || rainLevel !== "DRY";
+
+  const alerts = [];
+
+  if (soilTriggered) {
+    alerts.push({
+      id: "ALT-SOIL",
       title: "High Soil Moisture Detected",
-      description: "Soil moisture level is above the critical threshold.",
-      device: "Device 02",
+      description: `Soil moisture reached ${soilMoisture}% and exceeds the critical threshold.`,
+      device: "soilSensor",
       sensorType: "Soil Moisture Sensor",
-      location: "Zone 2",
-      subLocation: "Brgy. Sto. Niño",
+      location: "Barangay Malinao",
+      subLocation: "Slope monitoring area",
       severity: "CRITICAL",
       status: "New",
-      date: "May 27, 2025",
-      time: "10:35 AM",
-      reading: "72%",
+      date: new Date().toLocaleDateString(),
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      reading: `${soilMoisture}%`,
       threshold: "70%",
-    },
-    {
-      id: "ALT-002",
-      title: "Heavy Rainfall Detected",
-      description: "Rainfall intensity is too high.",
-      device: "Device 01",
-      sensorType: "Rainfall Sensor",
-      location: "Zone 1",
-      subLocation: "Brgy. Central",
+    });
+  }
+
+  if (rainTriggered) {
+    alerts.push({
+      id: "ALT-RAIN",
+      title: "Rain Detected",
+      description: `Rain sensor ${rainLevel === "DRY" ? "reported activity" : "is detecting rainfall"} at ${rainRaw} ADC.`,
+      device: "slope-01",
+      sensorType: "Rain Sensor",
+      location: "Barangay Malinao",
+      subLocation: "Slope monitoring area",
       severity: "CRITICAL",
       status: "New",
-      date: "May 27, 2025",
-      time: "10:18 AM",
-      reading: "2,740 ADC",
-      threshold: "2,500 ADC",
-    },
-    {
-      id: "ALT-003",
-      title: "Tilt Threshold Exceeded",
-      description: "Tilt level exceeds the warning threshold.",
-      device: "Device 03",
-      sensorType: "Tilt Sensor",
-      location: "Zone 3",
-      subLocation: "Brgy. Riverside",
-      severity: "WARNING",
-      status: "In Progress",
-      date: "May 27, 2025",
-      time: "09:55 AM",
-      reading: "1 (Triggered)",
-      threshold: "0 (Stable)",
-    },
-    {
-      id: "ALT-004",
-      title: "Vibration Detected",
-      description: "Unusual vibration detected.",
-      device: "Device 04",
-      sensorType: "Vibration Sensor",
-      location: "Zone 4",
-      subLocation: "Brgy. San Isidro",
-      severity: "WARNING",
-      status: "New",
-      date: "May 27, 2025",
-      time: "09:41 AM",
-      reading: "1 (Triggered)",
-      threshold: "0 (Stable)",
-    },
-    {
-      id: "ALT-005",
-      title: "Device Reconnected",
-      description: "Device 05 is back online.",
-      device: "Device 05",
-      sensorType: "Soil Moisture Sensor",
-      location: "Zone 2",
-      subLocation: "Brgy. Sto. Niño",
+      date: new Date().toLocaleDateString(),
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      reading: `${rainRaw} ADC`,
+      threshold: "0 ADC or dry state",
+    });
+  }
+
+  if (alerts.length === 0) {
+    return [{
+      id: "ALT-NORMAL",
+      title: "No Active Alerts",
+      description: "Current Firebase sensor readings are normal. No moisture or rainfall alert is active.",
+      device: "System",
+      sensorType: "Auto Monitor",
+      location: "Barangay Malinao",
+      subLocation: "Slope monitoring area",
       severity: "INFO",
       status: "Resolved",
-      date: "May 27, 2025",
-      time: "08:30 AM",
-      reading: "Connected",
+      date: new Date().toLocaleDateString(),
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      reading: "Normal",
       threshold: "N/A",
-    },
-  ]);
+    }];
+  }
+
+  return alerts;
+}
+
+function AlertsPage({ openSettings, setOpenSettings, markAllTrigger, liveSensors = {} }) {
+  const [alerts, setAlerts] = useState(() => buildLiveAlertsFromSensors(liveSensors));
 
   const [searchTerm, setSearchTerm] = useState("");
   const [severityFilter, setSeverityFilter] = useState("All Severities");
@@ -914,12 +1036,16 @@ function AlertsPage({ openSettings, setOpenSettings, markAllTrigger }) {
   const lastTriggerRef = useRef(markAllTrigger);
 
   useEffect(() => {
+    setAlerts(buildLiveAlertsFromSensors(liveSensors));
+  }, [liveSensors]);
+
+  useEffect(() => {
     if (markAllTrigger > 0 && markAllTrigger !== lastTriggerRef.current) {
       lastTriggerRef.current = markAllTrigger;
       setAlerts((prev) =>
         prev.map((a) => (a.status === "New" ? { ...a, status: "In Progress" } : a))
       );
-      toast.success("All 50 alerts marked as read.");
+      toast.success("All active alerts marked as read.");
     }
   }, [markAllTrigger]);
 
@@ -960,7 +1086,7 @@ function AlertsPage({ openSettings, setOpenSettings, markAllTrigger }) {
     {
       id: "critical",
       icon: dashboardIcons.alertCritical,
-      value: 5,
+      value: alerts.filter((alert) => alert.severity === "CRITICAL").length,
       label: "Critical Alerts",
       badge: "Requires immediate action",
       valueClass: "text-[#e11d48]",
@@ -969,7 +1095,7 @@ function AlertsPage({ openSettings, setOpenSettings, markAllTrigger }) {
     {
       id: "warning",
       icon: dashboardIcons.alertWarning,
-      value: 8,
+      value: alerts.filter((alert) => alert.severity === "WARNING").length,
       label: "Warning Alerts",
       badge: "Needs attention",
       valueClass: "text-[#ea580c]",
@@ -978,7 +1104,7 @@ function AlertsPage({ openSettings, setOpenSettings, markAllTrigger }) {
     {
       id: "info",
       icon: dashboardIcons.alertInfo,
-      value: 12,
+      value: alerts.filter((alert) => alert.severity === "INFO").length,
       label: "Informational",
       badge: "For your information",
       valueClass: "text-[#2563eb]",
@@ -987,7 +1113,7 @@ function AlertsPage({ openSettings, setOpenSettings, markAllTrigger }) {
     {
       id: "resolved",
       icon: dashboardIcons.alertResolved,
-      value: 25,
+      value: alerts.filter((alert) => alert.status === "Resolved").length,
       label: "Resolved Today",
       badge: "Closed alerts",
       valueClass: "text-[#15803d]",
@@ -1475,126 +1601,90 @@ function AlertsPage({ openSettings, setOpenSettings, markAllTrigger }) {
   );
 }
 
-function IncidentReportsPage() {
+function IncidentReportsPage({ highlightedReportId, setHighlightedReportId }) {
+  const [reports, setReports] = useState([]);
+  const [userMap, setUserMap] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Status");
   const [typeFilter, setTypeFilter] = useState("All Incident Types");
   const [locationFilter, setLocationFilter] = useState("All Locations");
+  const previousReportIdsRef = useRef(new Set());
+
+  useEffect(() => {
+    if (!firebaseDatabase) return;
+
+    const usersRef = dbRef(firebaseDatabase, "users");
+    const usersUnsubscribe = onValue(usersRef, (snapshot) => {
+      const value = snapshot.val() ?? {};
+      const nextMap = Object.fromEntries(
+        Object.entries(value).map(([uid, user]) => [uid, user?.displayName || user?.email || uid])
+      );
+      setUserMap(nextMap);
+    });
+
+    return () => usersUnsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseDatabase) return;
+
+    const reportsRef = dbRef(firebaseDatabase, "incidentReports");
+    const unsubscribe = onValue(reportsRef, (snapshot) => {
+      const value = snapshot.val() ?? {};
+      const reportEntries = Object.entries(value).map(([id, item]) => {
+        const timestamp = Number(item?.timestamp ?? Date.now());
+        const createdAt = new Date(timestamp);
+        const reporterName = userMap[item?.residentId] || item?.residentId || "Resident";
+
+        return {
+          id: `#INC-${String(id).slice(0, 8).toUpperCase()}`,
+          type: item?.incidentType || "Others",
+          desc: item?.description || "No description provided.",
+          icon: "/incident-icons/landslide.png",
+          iconBg: "bg-[#fff7ed] border border-[#ffedd5]",
+          location: item?.location || "Unknown location",
+          subLocation: item?.location || "Unknown location",
+          reporter: reporterName,
+          role: "Resident",
+          date: createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+          time: createdAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }),
+          status: item?.status || "Pending",
+          statusStyle:
+            item?.status === "Resolved"
+              ? "bg-[#ecfdf5] text-[#059669]"
+              : item?.status === "In Progress"
+              ? "bg-[#eff6ff] text-[#2563eb]"
+              : item?.status === "Dismissed"
+              ? "bg-[#f3e8ff] text-[#9333ea]"
+              : "bg-[#fff7ed] text-[#ea580c]",
+        };
+      });
+
+      setReports(reportEntries);
+    });
+
+    return () => unsubscribe();
+  }, [userMap]);
+
+  useEffect(() => {
+    if (!highlightedReportId) return;
+
+    const timer = setTimeout(() => {
+      const row = document.getElementById(`report-row-${highlightedReportId}`);
+      if (row) {
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 180);
+
+    return () => clearTimeout(timer);
+  }, [highlightedReportId]);
 
   const stats = [
-    { label: "Total Reports", value: "18", sub: "All time", icon: FileText, color: "text-[#f43f5e]", bg: "bg-[#ffeef0]" },
-    { label: "Pending", value: "6", sub: "Awaiting review", icon: Hourglass, color: "text-[#f59e0b]", bg: "bg-[#fffbeb]" },
-    { label: "In Progress", value: "9", sub: "Being addressed", icon: Eye, color: "text-[#3b82f6]", bg: "bg-[#eff6ff]" },
-    { label: "Resolved", value: "12", sub: "Successfully closed", icon: CheckCircle2, color: "text-[#10b981]", bg: "bg-[#ecfdf5]" },
-    { label: "Dismissed", value: "1", sub: "Not a hazard", icon: XCircle, color: "text-[#a855f7]", bg: "bg-[#f3e8ff]" },
-  ];
-
-  const reports = [
-    {
-      id: "#INC-2025-0018",
-      type: "Landslide / Soil Movement",
-      desc: "Soil movement observed near the slope.",
-      icon: "/incident-icons/landslide.png",
-      iconBg: "bg-[#fff7ed] border border-[#ffedd5]",
-      location: "Purok 4, Zone 2",
-      subLocation: "Near Riverbank",
-      reporter: "Juan Dela Cruz",
-      role: "Resident",
-      date: "May 27, 2025",
-      time: "09:25 AM",
-      status: "Pending",
-      statusStyle: "bg-[#fff7ed] text-[#ea580c]",
-    },
-    {
-      id: "#INC-2025-0017",
-      type: "Flooding",
-      desc: "Water level rising on the drainage area.",
-      icon: "/incident-icons/flooding.png",
-      iconBg: "bg-[#eff6ff] border border-[#dbeafe]",
-      location: "Purok 1, Zone 1",
-      subLocation: "Brgy. Central",
-      reporter: "Maria Santos",
-      role: "Resident",
-      date: "May 27, 2025",
-      time: "08:15 AM",
-      status: "In Progress",
-      statusStyle: "bg-[#eff6ff] text-[#2563eb]",
-    },
-    {
-      id: "#INC-2025-0016",
-      type: "Rockfall / Debris",
-      desc: "Rocks falling from the hillside.",
-      icon: "/incident-icons/rockfall.png",
-      iconBg: "bg-[#fff7ed] border border-[#ffedd5]",
-      location: "Purok 5, Zone 3",
-      subLocation: "Upper Slope Area",
-      reporter: "Pedro Reyes",
-      role: "Resident",
-      date: "May 26, 2025",
-      time: "04:40 PM",
-      status: "Resolved",
-      statusStyle: "bg-[#ecfdf5] text-[#059669]",
-    },
-    {
-      id: "#INC-2025-0015",
-      type: "Crack on Ground",
-      desc: "Visible cracks along the road.",
-      icon: "/incident-icons/crack.png",
-      iconBg: "bg-[#fff7ed] border border-[#ffedd5]",
-      location: "Purok 2, Zone 2",
-      subLocation: "Along the Road",
-      reporter: "Ana Lopez",
-      role: "Resident",
-      date: "May 26, 2025",
-      time: "02:10 PM",
-      status: "Pending",
-      statusStyle: "bg-[#fff7ed] text-[#ea580c]",
-    },
-    {
-      id: "#INC-2025-0014",
-      type: "Blocked Drainage",
-      desc: "Drainage is clogged with soil and debris.",
-      icon: "/incident-icons/drainage.png",
-      iconBg: "bg-[#eff6ff] border border-[#dbeafe]",
-      location: "Purok 1, Zone 1",
-      subLocation: "Near School",
-      reporter: "Ramon Garcia",
-      role: "Resident",
-      date: "May 26, 2025",
-      time: "11:30 AM",
-      status: "In Progress",
-      statusStyle: "bg-[#eff6ff] text-[#2563eb]",
-    },
-    {
-      id: "#INC-2025-0013",
-      type: "Fallen Tree",
-      desc: "Tree fell blocking the pathway.",
-      icon: "/incident-icons/tree.png",
-      iconBg: "bg-[#ecfdf5] border border-[#a7f3d0]",
-      location: "Purok 3, Zone 4",
-      subLocation: "Near Barangay Hall",
-      reporter: "Luisa Villa",
-      role: "Resident",
-      date: "May 25, 2025",
-      time: "03:45 PM",
-      status: "Resolved",
-      statusStyle: "bg-[#ecfdf5] text-[#059669]",
-    },
-    {
-      id: "#INC-2025-0012",
-      type: "Others",
-      desc: "Unusual water seepage on slope.",
-      icon: "/incident-icons/others.png",
-      iconBg: "bg-[#f1f5f9] border border-[#e2e8f0]",
-      location: "Purok 6, Zone 3",
-      subLocation: "Lower Slope Area",
-      reporter: "Mark Angelo",
-      role: "Resident",
-      date: "May 25, 2025",
-      time: "10:20 AM",
-      status: "Dismissed",
-      statusStyle: "bg-[#f3e8ff] text-[#9333ea]",
-    },
+    { label: "Total Reports", value: String(reports.length), sub: "All time", icon: FileText, color: "text-[#f43f5e]", bg: "bg-[#ffeef0]" },
+    { label: "Pending", value: String(reports.filter((row) => row.status === "Pending").length), sub: "Awaiting review", icon: Hourglass, color: "text-[#f59e0b]", bg: "bg-[#fffbeb]" },
+    { label: "In Progress", value: String(reports.filter((row) => row.status === "In Progress").length), sub: "Being addressed", icon: Eye, color: "text-[#3b82f6]", bg: "bg-[#eff6ff]" },
+    { label: "Resolved", value: String(reports.filter((row) => row.status === "Resolved").length), sub: "Successfully closed", icon: CheckCircle2, color: "text-[#10b981]", bg: "bg-[#ecfdf5]" },
+    { label: "Dismissed", value: String(reports.filter((row) => row.status === "Dismissed").length), sub: "Not a hazard", icon: XCircle, color: "text-[#a855f7]", bg: "bg-[#f3e8ff]" },
   ];
 
   const filteredReports = reports.filter((row) => {
@@ -1720,7 +1810,12 @@ function IncidentReportsPage() {
                 </tr>
               ) : (
                 filteredReports.map((row) => (
-                  <tr key={row.id} className="hover:bg-[#f8faf8] transition">
+                  <tr
+                    id={`report-row-${row.id}`}
+                    key={row.id}
+                    onClick={() => setHighlightedReportId(row.id)}
+                    className={`cursor-pointer transition ${highlightedReportId === row.id ? "bg-[#f3f4f6] ring-1 ring-[#cbd5e1]" : "hover:bg-[#f8faf8]"}`}
+                  >
                     <td className="py-4 pr-4 font-extrabold text-[#006b37]">
                       {row.id}
                     </td>
@@ -1801,107 +1896,234 @@ function IncidentReportsPage() {
   );
 }
 
-function SafeAnnouncementsPage() {
+function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }) {
+  const [announcements, setAnnouncements] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Status");
   const [typeFilter, setTypeFilter] = useState("All Types");
   const [priorityFilter, setPriorityFilter] = useState("All Priority");
+  const [form, setForm] = useState({
+    title: "",
+    message: "",
+    type: "Weather Advisory",
+    priority: "High",
+    status: "Published",
+    scheduledAt: "",
+  });
+  const [titleSuggestionsOpen, setTitleSuggestionsOpen] = useState(false);
+  const [savedTitles, setSavedTitles] = useState(() => {
+    try {
+      const stored = localStorage.getItem("slopeSenseAnnouncementTitles");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [softDeletedIds, setSoftDeletedIds] = useState(() => {
+    try {
+      const stored = localStorage.getItem("slopeSenseDeletedAnnouncements");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
+  const [menuAnnouncementId, setMenuAnnouncementId] = useState(null);
+  const [announcementToDelete, setAnnouncementToDelete] = useState(null);
+  const messageEditorRef = useRef(null);
+
+  const announcementTypeMeta = {
+    "Weather Advisory": { icon: CloudRain, accent: "bg-[#fef2f2] text-[#ef4444]", defaultTitle: "Heavy Rainfall Advisory" },
+    "Safety Reminder": { icon: Shield, accent: "bg-[#ecfdf5] text-[#059669]", defaultTitle: "Safety Reminder Notice" },
+    "System Update": { icon: Settings, accent: "bg-[#eff6ff] text-[#2563eb]", defaultTitle: "System Update Notice" },
+    Information: { icon: FileText, accent: "bg-[#fff7ed] text-[#ea580c]", defaultTitle: "Slope Safety Information" },
+    Event: { icon: CalendarDays, accent: "bg-[#f5f3ff] text-[#7c3aed]", defaultTitle: "Community Safety Event" },
+  };
+  const selectedAnnouncementType = announcementTypeMeta[form.type] || announcementTypeMeta["Weather Advisory"];
+  const SelectedAnnouncementIcon = selectedAnnouncementType.icon;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("slopeSenseAnnouncementTitles", JSON.stringify(savedTitles));
+    } catch {
+      // ignore storage write failures
+    }
+  }, [savedTitles]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("slopeSenseDeletedAnnouncements", JSON.stringify(softDeletedIds));
+    } catch {
+      // ignore storage write failures
+    }
+  }, [softDeletedIds]);
+
+  const saveTitleToHistory = useCallback((nextTitle) => {
+    const cleanTitle = (nextTitle || "").trim();
+    if (!cleanTitle) return;
+
+    setSavedTitles((prev) => {
+      const unique = prev.filter((item) => item.toLowerCase() !== cleanTitle.toLowerCase());
+      return [cleanTitle, ...unique].slice(0, 12);
+    });
+  }, []);
+
+  const removeTitleFromHistory = useCallback((titleToRemove) => {
+    setSavedTitles((prev) => prev.filter((item) => item !== titleToRemove));
+  }, []);
+
+  const typeTitleSuggestions = useMemo(() => {
+    const typeDefault = announcementTypeMeta[form.type]?.defaultTitle;
+    const items = [
+      ...(typeDefault ? [typeDefault] : []),
+      ...savedTitles,
+    ];
+
+    const query = form.title.trim().toLowerCase();
+    if (!query) return [...new Set(items)].slice(0, 6);
+
+    return [...new Set(items.filter((item) => item.toLowerCase().includes(query)))].slice(0, 6);
+  }, [form.type, form.title, savedTitles]);
+
+  const handleTypeChange = useCallback((nextType) => {
+    const nextDefaultTitle = announcementTypeMeta[nextType]?.defaultTitle || "";
+    setForm((prev) => ({
+      ...prev,
+      type: nextType,
+      title: nextDefaultTitle,
+    }));
+    setTitleSuggestionsOpen(true);
+  }, []);
+
+  const stripRichTextToPlainText = useCallback((value = "") => {
+    if (!value) return "";
+
+    return value
+      .replace(/<li[^>]*>/gi, "\n• ")
+      .replace(/<\/?ol[^>]*>/gi, "\n")
+      .replace(/<\/?ul[^>]*>/gi, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/?p\s*>/gi, "\n")
+      .replace(/<\/?div\s*>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }, []);
+
+  const updateMessageEditorFromState = useCallback(() => {
+    const editor = messageEditorRef.current;
+    if (!editor) return;
+    if (editor.innerHTML !== (form.message || "")) {
+      editor.innerHTML = form.message || "";
+    }
+  }, [form.message]);
+
+  useEffect(() => {
+    if (!firebaseDatabase) return;
+
+    const announcementsRef = dbRef(firebaseDatabase, "announcements");
+    const unsubscribe = onValue(announcementsRef, (snapshot) => {
+      const value = snapshot.val() ?? {};
+      const rows = Object.entries(value)
+        .map(([id, item]) => ({
+          id,
+          title: item?.title || "Untitled announcement",
+          desc: item?.description || item?.message || "No description provided.",
+          plainDesc: stripRichTextToPlainText(item?.description || item?.message || "No description provided."),
+          type: item?.type || "Information",
+          priority: item?.priority || "Medium",
+          status: item?.status || "Published",
+          scheduledAt: item?.scheduledAt || null,
+          publishedAt: item?.publishedAt || null,
+          createdAt: Number(item?.createdAt || Date.now()),
+        }))
+        .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+
+      setAnnouncements(rows);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const displayAnnouncements = announcements.map((row) => {
+    const isScheduled = row.status === "Scheduled" || (row.scheduledAt && Number(row.scheduledAt) > Date.now());
+    const computedStatus = isScheduled ? "Scheduled" : "Published";
+    const typeIcons = {
+      "Weather Advisory": CloudRain,
+      "Safety Reminder": Shield,
+      "System Update": Settings,
+      "Information": FileText,
+      Event: CalendarDays,
+    };
+    const typeColors = {
+      "Weather Advisory": "bg-[#ffeef0] text-[#ef4444] border border-[#fecdd3]",
+      "Safety Reminder": "bg-[#ecfdf5] border border-[#a7f3d0]",
+      "System Update": "bg-[#eff6ff] text-[#2563eb] border border-[#dbeafe]",
+      Information: "bg-[#fff7ed] text-[#ea580c] border border-[#ffedd5]",
+      Event: "bg-[#f3e8ff] text-[#9333ea] border border-[#e9d5ff]",
+    };
+    const iconMap = {
+      "Weather Advisory": AlertTriangle,
+      "Safety Reminder": Shield,
+      "System Update": Info,
+      Information: Mountain,
+      Event: Calendar,
+    };
+    const priorityStyleMap = {
+      High: "bg-[#ffeef0] text-[#ef4444]",
+      Medium: "bg-[#fff7ed] text-[#ea580c]",
+      Low: "bg-[#eff6ff] text-[#3b82f6]",
+    };
+    const statusStyleMap = {
+      Published: "bg-[#ecfdf5] text-[#059669]",
+      Scheduled: "bg-[#eff6ff] text-[#2563eb]",
+      Archived: "bg-[#f1f5f9] text-[#64748b]",
+    };
+
+    return {
+      ...row,
+      icon: iconMap[row.type] || Megaphone,
+      iconBg: typeColors[row.type] || "bg-[#f1f5f9] text-[#64748b] border border-[#e2e8f0]",
+      typeIcon: typeIcons[row.type] || Megaphone,
+      priorityStyle: priorityStyleMap[row.priority] || priorityStyleMap.Medium,
+      status: computedStatus,
+      statusStyle: statusStyleMap[computedStatus] || statusStyleMap.Published,
+      date: row.scheduledAt && computedStatus === "Scheduled"
+        ? new Date(Number(row.scheduledAt)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+        : row.publishedAt
+          ? new Date(Number(row.publishedAt)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          : new Date(Number(row.createdAt)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      time: row.scheduledAt && computedStatus === "Scheduled"
+        ? new Date(Number(row.scheduledAt)).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+        : row.publishedAt
+          ? new Date(Number(row.publishedAt)).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+          : new Date(Number(row.createdAt)).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+    };
+  });
+
+  const visibleAnnouncements = displayAnnouncements.filter((row) => !softDeletedIds.includes(row.id));
+
+  useEffect(() => {
+    if (announcementFormOpen) {
+      updateMessageEditorFromState();
+    }
+  }, [announcementFormOpen]);
 
   const stats = [
-    { label: "Total Announcements", value: "12", sub: "All time", icon: Megaphone, color: "text-[#10b981]", bg: "bg-[#ecfdf5]" },
-    { label: "Published", value: "5", sub: "Active and visible", icon: Send, color: "text-[#2563eb]", bg: "bg-[#eff6ff]" },
-    { label: "Scheduled", value: "3", sub: "To be published", icon: Clock, color: "text-[#d97706]", bg: "bg-[#fffbeb]" },
-    { label: "Archived", value: "4", sub: "No longer visible", icon: Archive, color: "text-[#9333ea]", bg: "bg-[#f3e8ff]" },
+    { label: "Total Announcements", value: String(visibleAnnouncements.length), sub: "All time", icon: Megaphone, color: "text-[#10b981]", bg: "bg-[#ecfdf5]" },
+    { label: "Published", value: String(visibleAnnouncements.filter((row) => row.status === "Published").length), sub: "Active and visible", icon: Send, color: "text-[#2563eb]", bg: "bg-[#eff6ff]" },
+    { label: "Scheduled", value: String(visibleAnnouncements.filter((row) => row.status === "Scheduled").length), sub: "To be published", icon: Clock, color: "text-[#d97706]", bg: "bg-[#fffbeb]" },
+    { label: "Archived", value: String(visibleAnnouncements.filter((row) => row.status === "Archived").length), sub: "No longer visible", icon: Archive, color: "text-[#9333ea]", bg: "bg-[#f3e8ff]" },
   ];
 
-  const announcements = [
-    {
-      title: "Heavy Rainfall Advisory",
-      desc: "Heavy rainfall is expected in the next 24-48 hours. Residents living near slope areas and flood-prone zones are advised to...",
-      icon: AlertTriangle,
-      iconBg: "bg-[#ffeef0] text-[#ef4444] border border-[#fecdd3]",
-      type: "Weather Advisory",
-      typeIcon: CloudRain,
-      priority: "High",
-      priorityStyle: "bg-[#ffeef0] text-[#ef4444]",
-      status: "Published",
-      statusStyle: "bg-[#ecfdf5] text-[#059669]",
-      date: "May 27, 2025",
-      time: "09:30 AM",
-    },
-    {
-      title: "Evacuation Reminder",
-      desc: "Please be reminded of the designated evacuation centers in your area. Prepare your emergency kits and stay alert.",
-      imgIcon: "/incident-icons/evacuation.png",
-      iconBg: "bg-[#ecfdf5] border border-[#a7f3d0]",
-      type: "Safety Reminder",
-      typeIcon: Shield,
-      priority: "Medium",
-      priorityStyle: "bg-[#fff7ed] text-[#ea580c]",
-      status: "Published",
-      statusStyle: "bg-[#ecfdf5] text-[#059669]",
-      date: "May 26, 2025",
-      time: "03:15 PM",
-    },
-    {
-      title: "System Maintenance Notice",
-      desc: "Scheduled system maintenance will be conducted tonight from 11:00 PM to 1:00 AM.",
-      icon: Info,
-      iconBg: "bg-[#eff6ff] text-[#2563eb] border border-[#dbeafe]",
-      type: "System Update",
-      typeIcon: Settings,
-      priority: "Low",
-      priorityStyle: "bg-[#eff6ff] text-[#3b82f6]",
-      status: "Scheduled",
-      statusStyle: "bg-[#eff6ff] text-[#2563eb]",
-      date: "May 27, 2025",
-      time: "11:00 PM",
-    },
-    {
-      title: "Landslide Awareness Tips",
-      desc: "Learn the signs of a possible landslide and what actions to take to keep your family safe.",
-      icon: Mountain,
-      iconBg: "bg-[#fff7ed] text-[#ea580c] border border-[#ffedd5]",
-      type: "Information",
-      typeIcon: FileText,
-      priority: "Medium",
-      priorityStyle: "bg-[#fff7ed] text-[#ea580c]",
-      status: "Published",
-      statusStyle: "bg-[#ecfdf5] text-[#059669]",
-      date: "May 25, 2025",
-      time: "08:00 AM",
-    },
-    {
-      title: "Community Drill Announcement",
-      desc: "Join us for the community disaster preparedness drill this Saturday, May 31, 2025 at 8:00 AM.",
-      icon: Calendar,
-      iconBg: "bg-[#f3e8ff] text-[#9333ea] border border-[#e9d5ff]",
-      type: "Event",
-      typeIcon: CalendarDays,
-      priority: "Medium",
-      priorityStyle: "bg-[#fff7ed] text-[#ea580c]",
-      status: "Scheduled",
-      statusStyle: "bg-[#eff6ff] text-[#2563eb]",
-      date: "May 31, 2025",
-      time: "08:00 AM",
-    },
-    {
-      title: "Typhoon Preparedness Guide",
-      desc: "Important guidelines before, during, and after a typhoon.",
-      icon: Archive,
-      iconBg: "bg-[#f1f5f9] text-[#64748b] border border-[#e2e8f0]",
-      type: "Information",
-      typeIcon: FileText,
-      priority: "Low",
-      priorityStyle: "bg-[#eff6ff] text-[#3b82f6]",
-      status: "Archived",
-      statusStyle: "bg-[#f1f5f9] text-[#64748b]",
-      date: "May 20, 2025",
-      time: "02:45 PM",
-    },
-  ];
-
-  const filteredAnnouncements = announcements.filter((row) => {
+  const filteredAnnouncements = visibleAnnouncements.filter((row) => {
     const query = searchTerm.trim().toLowerCase();
     const matchesSearch =
       !query ||
@@ -1916,16 +2138,254 @@ function SafeAnnouncementsPage() {
     return matchesSearch && matchesStatus && matchesType && matchesPriority;
   });
 
+  const handleSoftDelete = useCallback((announcementId) => {
+    setSoftDeletedIds((prev) => (prev.includes(announcementId) ? prev : [...prev, announcementId]));
+    setMenuAnnouncementId(null);
+    setAnnouncementToDelete(null);
+    toast.success("Announcement hidden from the app view.", {
+      description: "The original Firebase post remains intact.",
+    });
+  }, []);
+
+  const normalizePastedAnnouncementText = useCallback((rawText = "") => {
+    if (!rawText) return "";
+
+    const withHtmlDecoded = rawText
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'");
+
+    const withoutHtmlTags = withHtmlDecoded
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/?p\s*>/gi, "\n")
+      .replace(/<\/?div\s*>/gi, "\n")
+      .replace(/<li[^>]*>/gi, "\n• ")
+      .replace(/<\/?ul\s*>|<\/?ol\s*>/gi, "\n")
+      .replace(/<\/?(b|strong|u|i|em|span|font|h[1-6]|blockquote)[^>]*>/gi, "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .trim();
+
+    return withoutHtmlTags;
+  }, []);
+
+  const handleAnnouncementMessagePaste = useCallback((event) => {
+    const clipboardText = event.clipboardData.getData("text/plain");
+    const clipboardHtml = event.clipboardData.getData("text/html");
+    const pastedValue = normalizePastedAnnouncementText(clipboardHtml || clipboardText || "");
+
+    if (!pastedValue) return;
+
+    event.preventDefault();
+    const editor = messageEditorRef.current;
+    if (!editor) return;
+
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      const textNode = document.createTextNode(pastedValue);
+      range.insertNode(textNode);
+      range.setStartAfter(textNode);
+      range.setEndAfter(textNode);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } else {
+      editor.focus();
+      document.execCommand("insertText", false, pastedValue);
+    }
+
+    setForm((prev) => ({ ...prev, message: editor.innerHTML }));
+  }, [normalizePastedAnnouncementText]);
+
+  const savedEditorSelectionRef = useRef(null);
+
+  const saveEditorSelection = useCallback(() => {
+    const editor = messageEditorRef.current;
+    if (!editor) return;
+
+    const selection = window.getSelection && window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      savedEditorSelectionRef.current = null;
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (editor.contains(range.startContainer) && editor.contains(range.endContainer)) {
+      savedEditorSelectionRef.current = range.cloneRange();
+    } else {
+      savedEditorSelectionRef.current = null;
+    }
+  }, []);
+
+  const restoreEditorSelection = useCallback(() => {
+    const editor = messageEditorRef.current;
+    if (!editor) return;
+
+    const selection = window.getSelection && window.getSelection();
+    const savedRange = savedEditorSelectionRef.current;
+
+    if (selection && savedRange) {
+      selection.removeAllRanges();
+      selection.addRange(savedRange.cloneRange());
+    }
+
+    editor.focus();
+  }, []);
+
+  const syncEditorMessage = useCallback((sourceHtml) => {
+    const editor = messageEditorRef.current;
+    if (!editor) return;
+
+    const html = sourceHtml ?? editor.innerHTML ?? "";
+    setForm((prev) => ({ ...prev, message: html }));
+  }, []);
+
+  const placeCaretAtElement = useCallback((element) => {
+    const editor = messageEditorRef.current;
+    if (!editor || !element) return;
+
+    const selection = window.getSelection && window.getSelection();
+    if (!selection) return;
+
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    editor.focus();
+  }, []);
+
+  const handleEditorKeyDown = useCallback((event) => {
+    if (event.key !== "Enter") return;
+
+    const editor = messageEditorRef.current;
+    if (!editor) return;
+
+    const selection = window.getSelection && window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      syncEditorMessage(editor.innerHTML ?? "");
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const currentListItem = range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer.closest("li")
+      : range.startContainer.parentElement?.closest("li");
+
+    if (!currentListItem) {
+      return;
+    }
+
+    const list = currentListItem.parentElement;
+    if (!list || !["UL", "OL"].includes(list.tagName)) {
+      return;
+    }
+
+    const isEmpty = currentListItem.textContent.trim().length === 0;
+    if (isEmpty) {
+      event.preventDefault();
+      const exitCmd = list.tagName === "UL" ? "insertUnorderedList" : "insertOrderedList";
+      try {
+        document.execCommand(exitCmd, false, null);
+      } catch {
+        // Ignore unsupported command.
+      }
+      syncEditorMessage(editor.innerHTML ?? "");
+    }
+  }, [syncEditorMessage]);
+
+  const applyMessageCommand = useCallback((command) => {
+    const editor = messageEditorRef.current;
+    if (!editor) return;
+
+    restoreEditorSelection();
+
+    try {
+      if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+        document.execCommand(command, false, null);
+      }
+    } catch {
+      // Ignore unsupported native editor commands.
+    }
+
+    syncEditorMessage(editor.innerHTML ?? "");
+  }, [restoreEditorSelection, syncEditorMessage]);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    const title = form.title.trim();
+    const message = form.message.trim();
+
+    if (!title || !message) {
+      toast.error("Announcement title and message are required.");
+      return;
+    }
+
+    if (form.status === "Scheduled" && !form.scheduledAt) {
+      toast.error("Select a schedule date and time for scheduled announcements.");
+      return;
+    }
+
+    if (!firebaseDatabase) {
+      toast.error("Firebase is not configured.");
+      return;
+    }
+
+    try {
+      const timestamp = Date.now();
+      const scheduledValue = form.status === "Scheduled" ? new Date(form.scheduledAt).getTime() : null;
+
+      const announcementRef = push(dbRef(firebaseDatabase, "announcements"));
+      const sanitizedMessage = message.trim();
+
+      await set(announcementRef, {
+        title,
+        description: sanitizedMessage,
+        type: form.type,
+        priority: form.priority,
+        status: form.status,
+        createdAt: timestamp,
+        publishedAt: form.status === "Published" ? timestamp : null,
+        scheduledAt: scheduledValue,
+      });
+
+      toast.success("Announcement published", {
+        description: form.status === "Scheduled" ? `Scheduled for ${new Date(scheduledValue).toLocaleString()}.` : "The announcement is now live.",
+      });
+
+      saveTitleToHistory(title);
+      setForm({
+        title: "",
+        message: "",
+        type: "Weather Advisory",
+        priority: "High",
+        status: "Published",
+        scheduledAt: "",
+      });
+      setAnnouncementFormOpen(false);
+    } catch (error) {
+      toast.error("Unable to save announcement.", {
+        description: error?.message || "Please try again.",
+      });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((s) => {
           const IconComp = s.icon;
           return (
-            <div
-              key={s.label}
-              className="flex items-center gap-3.5 rounded-xl border border-[#dfe7e1] bg-white p-4 shadow-[0_2px_8px_rgba(20,61,42,0.03)]"
-            >
+            <div key={s.label} className="flex items-center gap-3.5 rounded-xl border border-[#dfe7e1] bg-white p-4 shadow-[0_2px_8px_rgba(20,61,42,0.03)]">
               <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-full ${s.bg} ${s.color}`}>
                 <IconComp size={22} />
               </div>
@@ -1951,21 +2411,13 @@ function SafeAnnouncementsPage() {
             />
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none"
-            >
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
               <option>All Status</option>
               <option>Published</option>
               <option>Scheduled</option>
               <option>Archived</option>
             </select>
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none"
-            >
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
               <option>All Types</option>
               <option>Weather Advisory</option>
               <option>Safety Reminder</option>
@@ -1973,11 +2425,7 @@ function SafeAnnouncementsPage() {
               <option>Information</option>
               <option>Event</option>
             </select>
-            <select
-              value={priorityFilter}
-              onChange={(e) => setPriorityFilter(e.target.value)}
-              className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none"
-            >
+            <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
               <option>All Priority</option>
               <option>High</option>
               <option>Medium</option>
@@ -2012,20 +2460,17 @@ function SafeAnnouncementsPage() {
                 filteredAnnouncements.map((row, idx) => {
                   const IconComponent = row.icon;
                   const TypeIconComponent = row.typeIcon;
+                  const isMenuOpen = menuAnnouncementId === row.id;
                   return (
-                    <tr key={idx} className="hover:bg-[#f8faf8] transition">
+                    <tr key={row.id || idx} className="hover:bg-[#f8faf8] transition">
                       <td className="py-4 pr-4">
                         <div className="flex items-center gap-3 max-w-[420px]">
                           <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${row.iconBg}`}>
-                            {row.imgIcon ? (
-                              <img src={row.imgIcon} alt="" className="h-5 w-5 object-contain" />
-                            ) : (
-                              <IconComponent size={18} />
-                            )}
+                            <IconComponent size={18} />
                           </span>
                           <div>
                             <div className="font-bold text-[#1e293b]">{row.title}</div>
-                            <div className="text-[11px] text-[#64748b] line-clamp-2 leading-relaxed">{row.desc}</div>
+                            <div className="text-[11px] text-[#64748b] line-clamp-2 leading-relaxed">{row.plainDesc || row.desc}</div>
                           </div>
                         </div>
                       </td>
@@ -2050,19 +2495,38 @@ function SafeAnnouncementsPage() {
                         <div className="text-[11px] text-[#64748b]">{row.time}</div>
                       </td>
                       <td className="py-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
+                        <div className="relative flex items-center justify-end gap-1.5">
                           <button
+                            type="button"
                             title="View details"
+                            onClick={() => setSelectedAnnouncement(row)}
                             className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
                           >
                             <Eye size={15} />
                           </button>
                           <button
+                            type="button"
                             title="More options"
+                            onClick={() => setMenuAnnouncementId(isMenuOpen ? null : row.id)}
                             className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
                           >
                             <MoreVertical size={15} />
                           </button>
+
+                          {isMenuOpen && (
+                            <div className="absolute right-0 top-10 z-20 w-40 rounded-xl border border-[#dfe7e1] bg-white p-2 shadow-[0_14px_30px_rgba(15,23,42,0.12)]">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAnnouncementToDelete(row);
+                                  setMenuAnnouncementId(null);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-[#dc2626] hover:bg-[#fff1f2]"
+                              >
+                                <Trash2 size={14} /> Delete
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2074,26 +2538,282 @@ function SafeAnnouncementsPage() {
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-[#edf0ed] pt-4 text-xs text-[#64748b]">
-          <div>Showing 1 to 6 of 12 announcements</div>
+          <div>Showing 1 to {Math.min(filteredAnnouncements.length, 6)} of {displayAnnouncements.length} announcements</div>
           <div className="flex items-center gap-1.5">
-            <button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:bg-slate-50 transition">
-              &lt;
-            </button>
-            <button className="grid h-8 w-8 place-items-center rounded-lg bg-[#006b37] text-white font-bold shadow-sm">
-              1
-            </button>
-            <button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:bg-slate-50 transition">
-              2
-            </button>
-            <button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:bg-slate-50 transition">
-              3
-            </button>
-            <button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:bg-slate-50 transition">
-              &gt;
-            </button>
+            <button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:bg-slate-50 transition">&lt;</button>
+            <button className="grid h-8 w-8 place-items-center rounded-lg bg-[#006b37] text-white font-bold shadow-sm">1</button>
+            <button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:bg-slate-50 transition">2</button>
+            <button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:bg-slate-50 transition">3</button>
+            <button className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] hover:bg-slate-50 transition">&gt;</button>
           </div>
         </div>
       </section>
+
+      {selectedAnnouncement && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#143a28]/35 px-4">
+          <div className="w-full max-w-xl rounded-2xl border border-[#dfe7e1] bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.15)]">
+            <div className="mb-5 flex items-center justify-between border-b border-[#edf0ed] pb-3">
+              <div className="flex items-center gap-3">
+                <div className={`grid h-11 w-11 place-items-center rounded-xl ${announcementTypeMeta[selectedAnnouncement.type]?.accent || "bg-[#f1f5f9] text-[#64748b]"}`}>
+                  {(() => {
+                    const Icon = announcementTypeMeta[selectedAnnouncement.type]?.icon || Megaphone;
+                    return <Icon size={20} />;
+                  })()}
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-[#111827]">{selectedAnnouncement.title}</h3>
+                  <p className="text-xs text-[#64748b]">{selectedAnnouncement.type}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setSelectedAnnouncement(null)} className="grid h-8 w-8 place-items-center rounded-lg text-[#64748b] hover:bg-slate-100 transition">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-sm text-[#334155]">
+              <div className="rounded-xl border border-[#dfe7e1] bg-[#f8fafc] p-3">
+                <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#64748b]">Announcement</div>
+                <div
+                  className="mt-2 whitespace-pre-wrap leading-6 text-[#1f2937] rich-text-content"
+                  dangerouslySetInnerHTML={{ __html: selectedAnnouncement.desc || "" }}
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-[#dfe7e1] p-3">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#64748b]">Priority</div>
+                  <div className="mt-2 inline-block rounded-md px-2.5 py-1 text-[11px] font-bold bg-[#ffeef0] text-[#ef4444]">{selectedAnnouncement.priority}</div>
+                </div>
+                <div className="rounded-xl border border-[#dfe7e1] p-3">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#64748b]">Status</div>
+                  <div className="mt-2 inline-block rounded-md px-2.5 py-1 text-[11px] font-bold bg-[#ecfdf5] text-[#059669]">{selectedAnnouncement.status}</div>
+                </div>
+                <div className="rounded-xl border border-[#dfe7e1] p-3">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#64748b]">Published</div>
+                  <div className="mt-2 text-[#1f2937]">{selectedAnnouncement.date} · {selectedAnnouncement.time}</div>
+                </div>
+                <div className="rounded-xl border border-[#dfe7e1] p-3">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#64748b]">Type</div>
+                  <div className="mt-2 text-[#1f2937]">{selectedAnnouncement.type}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setSelectedAnnouncement(null)} className="rounded-lg border border-[#dfe7e1] bg-white px-4 py-2.5 text-xs font-bold text-[#334155] hover:bg-slate-50 transition">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {announcementToDelete && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#143a28]/35 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-[#dfe7e1] bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.15)]">
+            <div className="flex items-center gap-3">
+              <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#fff1f2] text-[#dc2626]">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-extrabold text-[#111827]">Delete announcement?</h3>
+                <p className="text-xs text-[#64748b]">This will hide it from the app only.</p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-[#f3dada] bg-[#fff7f7] p-3 text-sm text-[#334155]">
+              <div className="font-bold text-[#111827]">{announcementToDelete.title}</div>
+              <div className="mt-1 text-xs text-[#64748b]">Original Firebase record remains unchanged.</div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setAnnouncementToDelete(null)} className="rounded-lg border border-[#dfe7e1] bg-white px-4 py-2.5 text-xs font-bold text-[#334155] hover:bg-slate-50 transition">
+                Cancel
+              </button>
+              <button type="button" onClick={() => handleSoftDelete(announcementToDelete.id)} className="rounded-lg bg-[#dc2626] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#b91c1c] transition">
+                Yes, delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {announcementFormOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#143a28]/35 px-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-[#dfe7e1] bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.15)]">
+            <div className="mb-5 flex items-center justify-between border-b border-[#edf0ed] pb-3">
+              <div className="flex items-center gap-3">
+                <div className={`grid h-11 w-11 place-items-center rounded-xl ${selectedAnnouncementType.accent}`}>
+                  <SelectedAnnouncementIcon size={20} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-[#111827]">New Announcement</h3>
+                  <p className="text-xs text-[#64748b]">Publish now or schedule for later.</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setAnnouncementFormOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg text-[#64748b] hover:bg-slate-100 transition">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-bold text-[#334155] flex items-center gap-2">
+                  <Megaphone size={14} className="text-[#006b37]" />
+                  Announcement
+                </label>
+
+                <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-[#dfe6e1] bg-[#f8fafc] p-2">
+                  <button type="button" onMouseDown={(event) => { event.preventDefault(); saveEditorSelection(); }} onClick={() => applyMessageCommand("bold")} className="grid h-8 w-8 place-items-center rounded-lg border border-[#dfe6e1] bg-white text-sm font-bold text-[#1e293b] hover:bg-slate-50">B</button>
+                  <button type="button" onMouseDown={(event) => { event.preventDefault(); saveEditorSelection(); }} onClick={() => applyMessageCommand("italic")} className="grid h-8 w-8 place-items-center rounded-lg border border-[#dfe6e1] bg-white text-sm italic text-[#1e293b] hover:bg-slate-50">I</button>
+                  <button type="button" onMouseDown={(event) => { event.preventDefault(); saveEditorSelection(); }} onClick={() => applyMessageCommand("insertUnorderedList")} className="grid h-8 w-8 place-items-center rounded-lg border border-[#dfe6e1] bg-white text-base text-[#1e293b] hover:bg-slate-50">•</button>
+                  <button type="button" onMouseDown={(event) => { event.preventDefault(); saveEditorSelection(); }} onClick={() => applyMessageCommand("insertOrderedList")} className="grid h-8 w-8 place-items-center rounded-lg border border-[#dfe6e1] bg-white text-base text-[#1e293b] hover:bg-slate-50">1.</button>
+                </div>
+
+                <div
+                  ref={messageEditorRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  onInput={(event) => {
+                    const html = event.currentTarget?.innerHTML ?? "";
+                    setForm((prev) => ({ ...prev, message: html }));
+                  }}
+                  onKeyDown={handleEditorKeyDown}
+                  onPaste={handleAnnouncementMessagePaste}
+                  className="min-h-[180px] w-full rounded-xl border border-[#dfe6e1] bg-white px-3 py-2.5 text-sm text-[#1e293b] outline-none focus:border-[#006b37]"
+                  style={{ resize: "vertical", whiteSpace: "pre-wrap", overflowWrap: "break-word", listStylePosition: "inside", paddingLeft: "0.75rem" }}
+                  data-placeholder="Write the announcement message..."
+                />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="text-xs font-bold text-[#334155] relative">
+                  Title
+                  <div className="relative mt-1.5">
+                    <input
+                      value={form.title}
+                      onFocus={() => setTitleSuggestionsOpen(true)}
+                      onBlur={() => {
+                        window.setTimeout(() => setTitleSuggestionsOpen(false), 120);
+                        saveTitleToHistory(form.title);
+                      }}
+                      onChange={(event) => {
+                        setForm((prev) => ({ ...prev, title: event.target.value }));
+                        setTitleSuggestionsOpen(true);
+                      }}
+                      className="w-full rounded-xl border border-[#dfe6e1] bg-white px-3 py-2.5 text-sm text-[#1e293b] outline-none focus:border-[#006b37]"
+                      placeholder="Heavy Rainfall Advisory"
+                    />
+
+                    {titleSuggestionsOpen && typeTitleSuggestions.length > 0 && (
+                      <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-xl border border-[#dfe7e1] bg-white p-2 shadow-[0_12px_30px_rgba(15,23,42,0.12)]">
+                        {typeTitleSuggestions.map((suggestion) => (
+                          <div
+                            key={suggestion}
+                            className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[#334155] hover:bg-[#f8fafc]"
+                          >
+                            <button
+                              type="button"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                setForm((prev) => ({ ...prev, title: suggestion }));
+                                saveTitleToHistory(suggestion);
+                                setTitleSuggestionsOpen(false);
+                              }}
+                              className="flex flex-1 items-center gap-2 text-left"
+                            >
+                              <span className={`grid h-7 w-7 place-items-center rounded-md ${selectedAnnouncementType.accent}`}>
+                                <SelectedAnnouncementIcon size={14} />
+                              </span>
+                              <span className="font-medium">{suggestion}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => removeTitleFromHistory(suggestion)}
+                              className="grid h-6 w-6 place-items-center rounded-md text-[#64748b] hover:bg-slate-100"
+                              aria-label={`Remove ${suggestion}`}
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </label>
+
+                <label className="text-xs font-bold text-[#334155]">
+                  Type
+                  <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-[#dfe6e1] bg-white px-3 py-2.5 text-sm text-[#1e293b] outline-none focus-within:border-[#006b37]">
+                    <div className={`grid h-8 w-8 place-items-center rounded-lg ${selectedAnnouncementType.accent}`}>
+                      <SelectedAnnouncementIcon size={16} />
+                    </div>
+                    <select
+                      value={form.type}
+                      onChange={(event) => handleTypeChange(event.target.value)}
+                      className="w-full bg-transparent text-sm font-medium text-[#1e293b] outline-none"
+                    >
+                      <option>Weather Advisory</option>
+                      <option>Safety Reminder</option>
+                      <option>System Update</option>
+                      <option>Information</option>
+                      <option>Event</option>
+                    </select>
+                  </div>
+                </label>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <label className="text-xs font-bold text-[#334155]">
+                  Priority
+                  <select
+                    value={form.priority}
+                    onChange={(event) => setForm((prev) => ({ ...prev, priority: event.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-[#dfe6e1] bg-white px-3 py-2.5 text-sm text-[#1e293b] outline-none focus:border-[#006b37]"
+                  >
+                    <option>High</option>
+                    <option>Medium</option>
+                    <option>Low</option>
+                  </select>
+                </label>
+
+                <label className="text-xs font-bold text-[#334155]">
+                  Status
+                  <select
+                    value={form.status}
+                    onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-[#dfe6e1] bg-white px-3 py-2.5 text-sm text-[#1e293b] outline-none focus:border-[#006b37]"
+                  >
+                    <option>Published</option>
+                    <option>Scheduled</option>
+                  </select>
+                </label>
+
+                <label className="text-xs font-bold text-[#334155]">
+                  Schedule
+                  <input
+                    type="datetime-local"
+                    value={form.scheduledAt}
+                    onChange={(event) => setForm((prev) => ({ ...prev, scheduledAt: event.target.value }))}
+                    disabled={form.status !== "Scheduled"}
+                    className="mt-1.5 w-full rounded-xl border border-[#dfe6e1] bg-white px-3 py-2.5 text-sm text-[#1e293b] outline-none focus:border-[#006b37] disabled:cursor-not-allowed disabled:bg-slate-50"
+                  />
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setAnnouncementFormOpen(false)} className="rounded-lg border border-[#dfe7e1] bg-white px-4 py-2.5 text-xs font-bold text-[#334155] hover:bg-slate-50 transition">
+                  Cancel
+                </button>
+                <button type="submit" className="rounded-lg bg-[#006b37] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#00522a] transition">
+                  {form.status === "Scheduled" ? "Save Schedule" : "Publish Now"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2578,7 +3298,130 @@ function Sidebar({ page, setPage, open, setOpen, onLogout }) {
   );
 }
 
-function Login({ onEnter }) {
+function ForgotPassword({ onBack }) {
+  const [email, setEmail] = useState(() => localStorage.getItem("slopesense-remember-email") || "");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!firebaseAuth) {
+      toast.error("Firebase Auth is not configured", {
+        description: "Add your Firebase credentials to the project .env file first.",
+      });
+      return;
+    }
+
+    if (!email.trim()) {
+      toast.error("Email is required", {
+        description: "Please enter your account email address.",
+      });
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await sendPasswordResetEmail(firebaseAuth, email.trim());
+      setEmailSent(true);
+      toast.success("Reset link sent", {
+        description: "A password reset email has been sent to your inbox.",
+      });
+    } catch (error) {
+      const message =
+        error?.code === "auth/user-not-found"
+          ? "No account is registered with that email address."
+          : error?.message || "Unable to send the reset email right now.";
+
+      toast.error("Password reset failed", {
+        description: message,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <main className="login-reference-scene min-h-screen bg-white">
+      <section className="grid min-h-screen overflow-hidden lg:grid-cols-2">
+        <div className="relative flex min-h-[260px] items-center justify-center px-6 py-10 lg:min-h-full">
+          <div className="relative z-10 text-center max-w-md">
+            <Logo stacked />
+            <div className="mt-8 flex items-center justify-center gap-4">
+              <span className="h-px w-24 bg-[#cbd5e1]" />
+              <ShieldCheck size={24} className="text-[#006b37] shrink-0" />
+              <span className="h-px w-24 bg-[#cbd5e1]" />
+            </div>
+            <p className="mt-3.5 text-sm font-medium text-[#475569]">
+              Monitoring Slopes. Protecting Communities.
+            </p>
+          </div>
+        </div>
+
+        <div className="relative flex items-center justify-center px-6 py-10 sm:px-8 lg:px-16">
+          <form
+            className="relative z-10 w-full max-w-[460px] rounded-2xl border border-[#dfe7e1] bg-white/95 p-6 sm:p-8 shadow-[0_20px_50px_rgba(0,107,55,0.06)] backdrop-blur-sm"
+            onSubmit={handleSubmit}
+          >
+            <button
+              type="button"
+              onClick={onBack}
+              className="mb-4 inline-flex items-center gap-2 text-sm font-bold text-[#006b37] hover:underline"
+            >
+              <ArrowLeft size={16} />
+              Back to login
+            </button>
+
+            <h1 className="text-center text-3xl font-extrabold tracking-tight text-[#006b37]">
+              Forgot Password?
+            </h1>
+            <p className="mt-2 text-center text-sm font-medium text-[#64748b]">
+              We’ll send a reset link to your account email.
+            </p>
+
+            <div className="mt-8 space-y-5">
+              <label className="block text-sm font-bold text-[#1e293b]">
+                Email Address
+                <span className="mt-2 flex h-12 items-center rounded-xl border border-[#cbd5e1] bg-white px-4 text-[#006b37] focus-within:border-[#006b37] focus-within:ring-2 focus-within:ring-[#006b37]/15 transition">
+                  <Mail size={18} strokeWidth={2} className="shrink-0 text-[#006b37]" />
+                  <input
+                    className="min-w-0 flex-1 bg-transparent px-3 text-sm font-normal text-[#1e293b] outline-none placeholder:text-[#94a3b8]"
+                    placeholder="Enter your email"
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    required
+                  />
+                </span>
+              </label>
+
+              {emailSent && (
+                <div className="rounded-xl border border-[#bbf7d0] bg-[#ecfdf5] px-3 py-2 text-sm text-[#065f46]">
+                  Password reset instructions were sent. Please check your inbox and spam folder.
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#005c2e] text-base font-bold text-white shadow-md hover:bg-[#004724] transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Mail size={18} />
+                {isSubmitting ? "Sending..." : "Send Reset Link"}
+              </button>
+            </div>
+
+            <div className="mt-7 text-center text-xs font-medium text-[#64748b]">
+              © 2026 SlopeSense. All rights reserved.
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function Login({ onEnter, onForgotPassword }) {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState(() => localStorage.getItem("slopesense-remember-email") || "");
   const [password, setPassword] = useState(() => localStorage.getItem("slopesense-remember-password") || "");
@@ -2712,7 +3555,7 @@ function Login({ onEnter }) {
                   />
                   Remember me
                 </label>
-                <button type="button" className="font-bold text-[#006b37] hover:underline">
+                <button type="button" onClick={onForgotPassword} className="font-bold text-[#006b37] hover:underline">
                   Forgot password?
                 </button>
               </div>
@@ -2767,6 +3610,7 @@ export default function Home() {
   const [page, setPage] = useState(() => window.location.hash.replace("#", "") || "dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
+  const [announcementFormOpen, setAnnouncementFormOpen] = useState(false);
   const [markAllAlertsTrigger, setMarkAllAlertsTrigger] = useState(0);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [profile, setProfile] = useState(() => {
@@ -2785,6 +3629,59 @@ export default function Home() {
       return defaultPreferences;
     }
   });
+  const [liveSensors, setLiveSensors] = useState({
+    soil: { moisturePercent: 33, rawValue: 2392, level: "NORMAL", sensorType: "soilMoisture" },
+    rain: { rawValue: 0, level: "DRY" },
+  });
+  const [liveNotificationCount, setLiveNotificationCount] = useState(0);
+  const [highlightedReportId, setHighlightedReportId] = useState(null);
+  const [userMap, setUserMap] = useState({});
+  const [notifications, setNotifications] = useState(() => {
+    try {
+      const saved = localStorage.getItem("slopesense-app-notifications");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
+  const lastAlertRef = useRef(null);
+  const previousIncidentIdsRef = useRef(new Set());
+
+  const unreadNotifications = notifications.filter((notification) => !notification.read).length;
+
+  const addNotification = useCallback((title, description, tone = "info", targetPage = "dashboard", reportId = null) => {
+    const item = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      title,
+      description,
+      tone,
+      targetPage,
+      reportId,
+      createdAt: new Date().toISOString(),
+      read: false,
+    };
+
+    setNotifications((previous) => [item, ...previous].slice(0, 25));
+
+    if (tone === "success") {
+      toast.success(title, { description });
+    } else if (tone === "warning") {
+      toast.warning(title, { description });
+    } else if (tone === "error") {
+      toast.error(title, { description });
+    } else {
+      toast.info(title, { description });
+    }
+  }, []);
+
+  const handleNotificationRead = (id) => {
+    setNotifications((previous) =>
+      previous.map((notification) =>
+        notification.id === id ? { ...notification, read: true } : notification
+      )
+    );
+  };
 
   useEffect(() => {
     localStorage.setItem("slopesense-profile", JSON.stringify(profile));
@@ -2794,8 +3691,110 @@ export default function Home() {
     localStorage.setItem("slopesense-notifications", JSON.stringify(preferences));
   }, [preferences]);
 
-  if (page === "login") return <Login onEnter={() => setPage("dashboard")} />;
+  useEffect(() => {
+    localStorage.setItem("slopesense-app-notifications", JSON.stringify(notifications));
+  }, [notifications]);
+
+  useEffect(() => {
+    if (!firebaseDatabase) return;
+
+    const sensorRef = dbRef(firebaseDatabase, "sensors");
+    const unsubscribe = onValue(sensorRef, (snapshot) => {
+      const data = snapshot.val() ?? {};
+      const soil = data.soilSensor?.latest ?? {};
+      const rain = data["slope-01"]?.latest ?? {};
+
+      const nextSensors = {
+        soil: {
+          moisturePercent: Number(soil.moisturePercent ?? 33),
+          rawValue: Number(soil.rawValue ?? 2392),
+          level: soil.level ?? "NORMAL",
+          sensorType: soil.sensorType ?? "soilMoisture",
+        },
+        rain: {
+          rawValue: Number(rain.rawValue ?? 0),
+          level: rain.level ?? "DRY",
+        },
+      };
+
+      setLiveSensors(nextSensors);
+
+      const soilTriggered = Number(nextSensors.soil.moisturePercent) >= 70;
+      const rainTriggered = Number(nextSensors.rain.rawValue) > 0 || String(nextSensors.rain.level).toLowerCase() !== "dry";
+      const alertCount = (soilTriggered ? 1 : 0) + (rainTriggered ? 1 : 0);
+      setLiveNotificationCount(alertCount);
+
+      const alertMessage = [];
+      if (soilTriggered) {
+        alertMessage.push(`Soil moisture alert: ${nextSensors.soil.moisturePercent}%`);
+      }
+      if (rainTriggered) {
+        alertMessage.push(`Rain sensor detected: ${nextSensors.rain.rawValue} ADC`);
+      }
+
+      if (alertMessage.length > 0) {
+        const message = alertMessage.join(" • ");
+        if (lastAlertRef.current !== message) {
+          lastAlertRef.current = message;
+          addNotification("Sensor notification", message, "warning", "alerts");
+        }
+      } else if (lastAlertRef.current) {
+        lastAlertRef.current = null;
+      }
+    });
+
+    return () => unsubscribe();
+  }, [addNotification]);
+
+  useEffect(() => {
+    if (!firebaseDatabase) return;
+
+    const usersRef = dbRef(firebaseDatabase, "users");
+    const usersUnsubscribe = onValue(usersRef, (snapshot) => {
+      const value = snapshot.val() ?? {};
+      setUserMap(
+        Object.fromEntries(Object.entries(value).map(([uid, user]) => [uid, user?.displayName || user?.email || uid]))
+      );
+    });
+
+    return () => usersUnsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseDatabase) return;
+
+    const reportsRef = dbRef(firebaseDatabase, "incidentReports");
+    const unsubscribe = onValue(reportsRef, (snapshot) => {
+      const value = snapshot.val() ?? {};
+      const reportIds = Object.keys(value);
+      const newReportIds = reportIds.filter((id) => !previousIncidentIdsRef.current.has(id));
+
+      if (newReportIds.length > 0) {
+        const title = newReportIds.length > 1 ? "New incident reports" : "New incident report";
+
+        newReportIds.forEach((reportId) => {
+          const item = value[reportId] ?? {};
+          const type = item.incidentType || "Incident";
+          const location = item.location || "Unknown location";
+          const reporterName = item.residentId ? (userMap[item.residentId] || item.residentId) : "Resident";
+          const compactDescription = `${type} • ${location} • ${reporterName}`;
+          addNotification(title, compactDescription, "success", "incidents", `#INC-${String(reportId).slice(0, 8).toUpperCase()}`);
+        });
+      }
+
+      previousIncidentIdsRef.current = new Set(reportIds);
+    });
+
+    return () => unsubscribe();
+  }, [addNotification, userMap]);
+
+  if (page === "login") return <Login onEnter={() => setPage("dashboard")} onForgotPassword={() => setPage("forgot-password")} />;
+  if (page === "forgot-password") return <ForgotPassword onBack={() => setPage("login")} />;
   const [title, subtitle] = pageMeta[page];
+  const sensorData = buildSensorData(liveSensors);
+  const monitoringSensorData = buildMonitoringSensorData(liveSensors);
+  const recentSensorReadings = buildRecentReadings(liveSensors);
+  const shouldShowAlertBadge = unreadNotifications > 0;
   return (
     <div className="min-h-screen bg-[#f7f9f7] text-[#27352f]">
       <div className="flex min-h-screen">
@@ -2834,16 +3833,88 @@ export default function Home() {
                   <Clock size={15} className="text-[#475569]" /> 10:42 AM
                 </div>
               </div>
-              <button
-                onClick={() => setPage("alerts")}
-                className="relative flex items-center justify-center p-2 text-[#0f172a] hover:text-[#087442] hover:bg-[#f1f5f9] rounded-full transition"
-                aria-label="Notifications"
-              >
-                <Bell size={24} strokeWidth={2.2} className="text-[#0f172a]" />
-                <span className="absolute -top-0.5 -right-0.5 flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-[#ef4444] px-1 text-[11px] font-bold text-white shadow-sm ring-2 ring-white">
-                  3
-                </span>
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setNotificationPanelOpen((previous) => !previous)}
+                  className="relative flex items-center justify-center p-2 text-[#0f172a] hover:text-[#087442] hover:bg-[#f1f5f9] rounded-full transition"
+                  aria-label="Notifications"
+                >
+                  <Bell size={24} strokeWidth={2.2} className="text-[#0f172a]" />
+                  {shouldShowAlertBadge && (
+                    <span className="absolute -top-0.5 -right-0.5 flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-[#ef4444] px-1 text-[11px] font-bold text-white shadow-sm ring-2 ring-white">
+                      {unreadNotifications}
+                    </span>
+                  )}
+                </button>
+
+                {notificationPanelOpen && (
+                  <div className="absolute right-0 top-12 z-50 w-[360px] rounded-2xl border border-[#e2e8f0] bg-white p-3 shadow-[0_18px_45px_rgba(15,23,42,0.15)]">
+                    <div className="mb-2 flex items-center justify-between border-b border-[#edf2f7] pb-2">
+                      <div className="text-sm font-extrabold text-[#0f172a]">Notifications</div>
+                      <button
+                        type="button"
+                        onClick={() => setNotifications((previous) => previous.map((item) => ({ ...item, read: true })))}
+                        className="text-[11px] font-bold text-[#006b37]"
+                      >
+                        Mark all read
+                      </button>
+                    </div>
+
+                    <div className="max-h-[320px] space-y-2 overflow-y-auto">
+                      {notifications.length === 0 ? (
+                        <div className="px-2 py-6 text-center text-xs text-[#64748b]">No notifications yet.</div>
+                      ) : (
+                        notifications.map((notification) => (
+                          <button
+                            key={notification.id}
+                            type="button"
+                            onClick={() => {
+                              handleNotificationRead(notification.id);
+                              if (notification.reportId) {
+                                setHighlightedReportId(notification.reportId);
+                                setPage(notification.targetPage || "incidents");
+                                setNotificationPanelOpen(false);
+                                setTimeout(() => {
+                                  const row = document.getElementById(`report-row-${notification.reportId}`);
+                                  if (row) {
+                                    row.scrollIntoView({ behavior: "smooth", block: "center" });
+                                  }
+                                }, 180);
+                              } else {
+                                setPage(notification.targetPage || "dashboard");
+                                setNotificationPanelOpen(false);
+                              }
+                            }}
+                            className={`w-full rounded-xl border p-2.5 text-left transition ${
+                              notification.read
+                                ? "border-[#edf2f7] bg-[#f8fafc] opacity-75"
+                                : "border-[#dbeafe] bg-[#eff6ff] font-bold"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="text-xs font-extrabold text-[#0f172a]">{notification.title}</div>
+                                <div className="mt-1 text-[11px] leading-relaxed text-[#475569]">{notification.description}</div>
+                              </div>
+                              {!notification.read && (
+                                <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-[#ef4444]" />
+                              )}
+                            </div>
+                            <div className="mt-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[#64748b]">
+                              {new Date(notification.createdAt).toLocaleString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                hour: "numeric",
+                                minute: "2-digit",
+                              })}
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="h-8 w-px bg-[#e5e7eb]" />
               <button
                 onClick={() => setPage("profile")}
@@ -2898,22 +3969,42 @@ export default function Home() {
                     </button>
                   )}
                   {page === "announcements" && (
-                    <button className="rounded-lg bg-[#087442] px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#065e35] transition">
+                    <button
+                      type="button"
+                      onClick={() => setAnnouncementFormOpen(true)}
+                      className="rounded-lg bg-[#087442] px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#065e35] transition"
+                    >
                       + New Announcement
                     </button>
                   )}
                 </div>
-                {page === "dashboard" && <DashboardOverview setPage={setPage} />}
-                {page === "sensors" && <SensorsPage />}
+                {page === "dashboard" && <DashboardOverview setPage={setPage} sensorData={sensorData} activeAlertCount={liveNotificationCount} />}
+                {page === "sensors" && (
+                  <SensorsPage
+                    monitoringSensorData={monitoringSensorData}
+                    recentSensorReadings={recentSensorReadings}
+                  />
+                )}
                 {page === "alerts" && (
                   <AlertsPage
                     openSettings={alertSettingsOpen}
                     setOpenSettings={setAlertSettingsOpen}
                     markAllTrigger={markAllAlertsTrigger}
+                    liveSensors={liveSensors}
                   />
                 )}
-                {page === "incidents" && <IncidentReportsPage />}
-                {page === "announcements" && <SafeAnnouncementsPage />}
+                {page === "incidents" && (
+                  <IncidentReportsPage
+                    highlightedReportId={highlightedReportId}
+                    setHighlightedReportId={setHighlightedReportId}
+                  />
+                )}
+                {page === "announcements" && (
+                  <SafeAnnouncementsPage
+                    announcementFormOpen={announcementFormOpen}
+                    setAnnouncementFormOpen={setAnnouncementFormOpen}
+                  />
+                )}
                 {page === "profile" && <ReferenceProfilePage profile={profile} setProfile={setProfile} preferences={preferences} setPreferences={setPreferences} />}
               </motion.div>
             </AnimatePresence>

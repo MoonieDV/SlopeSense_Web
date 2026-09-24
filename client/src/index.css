@@ -244,3 +244,28 @@
     background-position: left bottom;
   }
 }
+
+/* Rich Text / ContentEditable List Styling */
+[contenteditable] ul,
+.rich-text-content ul {
+  list-style-type: disc !important;
+  padding-left: 1.5rem !important;
+  margin-top: 0.35rem !important;
+  margin-bottom: 0.35rem !important;
+}
+
+[contenteditable] ol,
+.rich-text-content ol {
+  list-style-type: decimal !important;
+  padding-left: 1.5rem !important;
+  margin-top: 0.35rem !important;
+  margin-bottom: 0.35rem !important;
+}
+
+[contenteditable] li,
+.rich-text-content li {
+  display: list-item !important;
+  margin-top: 0.15rem !important;
+  margin-bottom: 0.15rem !important;
+}
+
