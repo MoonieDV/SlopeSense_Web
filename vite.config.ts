@@ -203,7 +203,19 @@ function vitePluginStorageProxy(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), vitePluginStorageProxy()];
+const plugins = [react(), tailwindcss()];
+
+// The Manus runtime is only needed when this project is hosted inside Manus.
+// Injecting it during ordinary local development adds a host-specific bootstrap
+// script that can prevent the standalone React app from mounting.
+if (process.env.MANUS_RUNTIME_ENABLED === "true") {
+  plugins.push(
+    jsxLocPlugin(),
+    vitePluginManusRuntime(),
+    vitePluginManusDebugCollector(),
+    vitePluginStorageProxy(),
+  );
+}
 
 export default defineConfig({
   plugins,
