@@ -3608,7 +3608,10 @@ export default function Home() {
   };
   const LAST_SENSOR_ALERT_KEY = "slopesense-last-sensor-alert";
 
-  const [page, setPage] = useState(() => window.location.hash.replace("#", "") || "dashboard");
+  const [page, setPage] = useState(() => {
+    const requestedPage = window.location.hash.replace("#", "");
+    return requestedPage && pageMeta[requestedPage] ? requestedPage : "dashboard";
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
   const [announcementFormOpen, setAnnouncementFormOpen] = useState(false);
