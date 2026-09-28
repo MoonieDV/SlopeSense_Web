@@ -3606,6 +3606,7 @@ export default function Home() {
     systemMaintenance: false,
     weeklyReports: false,
   };
+  const LAST_SENSOR_ALERT_KEY = "slopesense-last-sensor-alert";
 
   const [page, setPage] = useState(() => window.location.hash.replace("#", "") || "dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -3645,7 +3646,13 @@ export default function Home() {
     }
   });
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
-  const lastAlertRef = useRef(null);
+  const lastAlertRef = useRef(() => {
+    try {
+      return localStorage.getItem(LAST_SENSOR_ALERT_KEY);
+    } catch {
+      return null;
+    }
+  });
   const previousIncidentIdsRef = useRef(new Set());
 
   const unreadNotifications = notifications.filter((notification) => !notification.read).length;
@@ -3736,10 +3743,20 @@ export default function Home() {
         const message = alertMessage.join(" • ");
         if (lastAlertRef.current !== message) {
           lastAlertRef.current = message;
+          try {
+            localStorage.setItem(LAST_SENSOR_ALERT_KEY, message);
+          } catch {
+            // Ignore storage failures for guest/local-only state.
+          }
           addNotification("Sensor notification", message, "warning", "alerts");
         }
       } else if (lastAlertRef.current) {
         lastAlertRef.current = null;
+        try {
+          localStorage.removeItem(LAST_SENSOR_ALERT_KEY);
+        } catch {
+          // Ignore storage failures for guest/local-only state.
+        }
       }
     });
 
