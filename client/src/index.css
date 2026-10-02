@@ -164,15 +164,47 @@
   pointer-events: none;
 }
 .sidebar-terrain > * { position: relative; z-index: 1; }
-.sidebar-terrain .sidebar-status {
-  border: 1px solid rgba(255,255,255,0.24);
-  background: rgba(4, 88, 47, 0.82);
-  color: #fff;
-  backdrop-filter: blur(4px);
+
+/* Global dashboard shell: persistent navigation with a consistent surface. */
+.app-sidebar {
+  border-right: 1px solid #dfe8e1;
+  box-shadow: 8px 0 24px rgba(21, 65, 43, 0.055);
 }
-.sidebar-terrain .sidebar-status div,
-.sidebar-terrain .sidebar-status .text-\[0\.62rem\],
-.sidebar-terrain .sidebar-status .text-\[0\.55rem\] { color: #f2fff3; }
+
+.app-sidebar-brand,
+.app-header {
+  border-bottom: 1px solid rgba(214, 225, 217, 0.92);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 1px 0 rgba(15, 74, 45, 0.025);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.app-sidebar-nav {
+  background: transparent;
+}
+
+.app-nav-item {
+  min-height: 44px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.app-nav-item-active {
+  border-color: #006b37;
+  background: linear-gradient(135deg, #087442 0%, #005c2e 100%);
+  color: #fff;
+  box-shadow: 0 5px 16px rgba(0, 107, 55, 0.22);
+}
+
+.app-nav-item:focus-visible {
+  outline: 3px solid rgba(8, 116, 66, 0.22);
+  outline-offset: 2px;
+}
+
+.app-header {
+  box-shadow: 0 4px 18px rgba(23, 64, 43, 0.06);
+}
 
 /* Dashboard reading rhythm: bound very wide content while retaining the full usable pane. */
 .min-w-0.flex-1 > main {

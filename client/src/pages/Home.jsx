@@ -3238,11 +3238,11 @@ function Sidebar({ page, setPage, open, setOpen, onLogout }) {
   return (
     <>
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex sidebar-terrain w-64 flex-col border-r border-[#e3e9e4] bg-white transition-transform duration-200 md:static ${
+        className={`app-sidebar fixed inset-y-0 left-0 z-40 flex sidebar-terrain w-64 flex-col transition-transform duration-200 md:sticky md:top-0 md:h-screen md:self-start ${
           open ? "translate-x-0 md:flex" : "-translate-x-full md:hidden"
         }`}
       >
-        <div className="flex h-[76px] items-center border-b border-[#edf0ed] px-6">
+        <div className="app-sidebar-brand flex h-[76px] shrink-0 items-center px-6">
           <Logo small />
           <button
             onClick={() => setOpen(false)}
@@ -3251,17 +3251,18 @@ function Sidebar({ page, setPage, open, setOpen, onLogout }) {
             <X size={17} />
           </button>
         </div>
-        <div className="flex-1 px-4 py-6">
-          <nav className="space-y-2">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6">
+          <nav className="app-sidebar-nav space-y-2" aria-label="Main navigation">
             {items.map(([id, Icon, label]) => (
               <button
                 key={id}
                 onClick={() => setPage(id)}
-                className={`flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
+                className={`app-nav-item flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
                   page === id
-                    ? "bg-[#006b37] text-white shadow-[0_4px_14px_rgba(0,107,55,0.2)]"
-                    : "text-[#111827] hover:bg-[#f0f6f1] hover:text-[#006b37]"
+                    ? "app-nav-item-active"
+                    : "text-[#24352d] hover:border-[#b9d8c5] hover:bg-[#edf7f0] hover:text-[#006b37]"
                 }`}
+                aria-current={page === id ? "page" : undefined}
               >
                 <Icon size={20} strokeWidth={2.2} />
                 {label}
@@ -3269,22 +3270,12 @@ function Sidebar({ page, setPage, open, setOpen, onLogout }) {
             ))}
             <button
               onClick={onLogout}
-              className="flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-left text-sm font-semibold text-[#111827] transition hover:bg-[#fef2f2] hover:text-[#dc2626]"
+              className="app-nav-item flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-left text-sm font-semibold text-[#24352d] transition hover:border-[#fecaca] hover:bg-[#fef2f2] hover:text-[#dc2626]"
             >
               <LogOut size={20} strokeWidth={2.2} />
               Logout
             </button>
           </nav>
-        </div>
-        <div className="mx-4 mb-5 rounded-2xl border border-white/20 bg-[#04582f]/85 p-3.5 text-white shadow-lg backdrop-blur-sm">
-          <div className="text-xs font-bold text-white">System Status</div>
-          <div className="mt-2 flex items-center gap-2 text-xs font-medium text-white">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#34d399]" />
-            All Systems Operational
-          </div>
-          <div className="mt-1.5 text-[10px] text-white/70">
-            Last updated: May 27, 2025 10:42 AM
-          </div>
         </div>
       </aside>
       {open && (
@@ -3809,7 +3800,7 @@ export default function Home() {
           onLogout={() => setLogoutConfirmOpen(true)}
         />
         <div className="min-w-0 flex-1">
-          <header className="flex h-[76px] items-center justify-between border-b border-[#e5e9e6] bg-white px-6 sm:px-8">
+          <header className="app-header sticky top-0 z-30 flex h-[76px] items-center justify-between px-4 sm:px-8">
             <div className="flex items-center gap-3 sm:gap-4">
               <button
                 onClick={() => setSidebarOpen((open) => !open)}
@@ -3965,11 +3956,6 @@ export default function Home() {
                         Mark All as Read
                       </button>
                     </div>
-                  )}
-                  {page === "incidents" && (
-                    <button className="rounded-lg bg-[#087442] px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#065e35] transition">
-                      + New Incident Report
-                    </button>
                   )}
                   {page === "announcements" && (
                     <button
