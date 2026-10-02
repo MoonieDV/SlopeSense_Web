@@ -76,55 +76,98 @@ const dashboardIcons = {
   alertResolved: "/dashboard-icons/alert-resolved.png",
 };
 
+const getDetectionState = (sensor = {}, candidateFields = []) => {
+  for (const field of candidateFields) {
+    const raw = sensor[field];
+    if (raw === undefined || raw === null || raw === "") continue;
+
+    if (typeof raw === "boolean") return raw;
+
+    const normalized = String(raw).trim().toLowerCase();
+    if (["1", "true", "yes", "detected", "active", "warning", "tilt detected", "vibration detected"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "normal", "stable", "clear"].includes(normalized)) {
+      return false;
+    }
+
+    const numericValue = Number(raw);
+    if (!Number.isNaN(numericValue)) {
+      return numericValue > 0;
+    }
+  }
+
+  return false;
+};
+
+const isSensorOffline = (sensor = {}) => {
+  if (!sensor || Object.keys(sensor).length === 0) return true;
+
+  const updatedAt = Number(sensor.updatedAt ?? sensor.timestamp ?? 0);
+  if (!Number.isFinite(updatedAt) || updatedAt <= 0) {
+    return true;
+  }
+
+  return Date.now() - updatedAt > 10 * 60 * 1000;
+};
+
 const buildSensorData = (liveSensors = {}) => {
   const soil = liveSensors.soil ?? {};
   const rain = liveSensors.rain ?? {};
+  const tilt = liveSensors.tilt ?? {};
+  const vibration = liveSensors.vibration ?? {};
   const soilMoisture = Number(soil.moisturePercent ?? 33);
   const rainADC = Number(rain.rawValue ?? 0);
   const soilWarning = soilMoisture >= 70;
   const rainWarning = Number(rainADC) > 0 || String(rain.level ?? "").toLowerCase() !== "dry";
+  const tiltDetected = getDetectionState(tilt, ["tiltDetected", "detected", "level", "value", "status"]);
+  const vibrationDetected = getDetectionState(vibration, ["vibrationDetected", "detected", "level", "value", "status"]);
+  const soilOffline = isSensorOffline(soil);
+  const rainOffline = isSensorOffline(rain);
+  const tiltOffline = isSensorOffline(tilt);
+  const vibrationOffline = isSensorOffline(vibration);
 
   return [
     {
       id: "soil",
       name: "SOIL MOISTURE",
       code: "(Capacitive Sensor)",
-      value: `${soilMoisture}%`,
-      detail: soilWarning ? "Moisture Level High" : "Moisture Level",
-      state: soilWarning ? "WARNING" : "NORMAL",
-      tone: "green",
-      trend: soilWarning ? "Increasing" : "Stable",
+      value: soilOffline ? "OFFLINE" : `${soilMoisture}%`,
+      detail: soilOffline ? "Device unavailable" : soilWarning ? "Moisture Level High" : "Moisture Level",
+      state: soilOffline ? "OFFLINE" : soilWarning ? "WARNING" : "NORMAL",
+      tone: soilOffline ? "red" : "green",
+      trend: soilOffline ? "No data" : soilWarning ? "Increasing" : "Stable",
       icon: Droplet,
     },
     {
       id: "rain",
       name: "RAIN (YL-83)",
       code: "",
-      value: rainWarning ? "RAIN DETECTED" : "NO RAIN",
-      reading: `${rainADC}`,
-      detail: rainWarning ? "Sensor Reading (ADC)" : "Sensor Reading (ADC)",
-      state: rainWarning ? "WARNING" : "NORMAL",
-      tone: "blue",
+      value: rainOffline ? "OFFLINE" : rainWarning ? "RAIN DETECTED" : "NO RAIN",
+      reading: rainOffline ? "--" : `${rainADC}`,
+      detail: rainOffline ? "Device unavailable" : "Sensor Reading (ADC)",
+      state: rainOffline ? "OFFLINE" : rainWarning ? "WARNING" : "NORMAL",
+      tone: rainOffline ? "red" : "blue",
       icon: CloudRain,
     },
     {
       id: "tilt",
       name: "TILT (SW-520D)",
       code: "",
-      value: "STABLE",
-      detail: "No tilt detected",
-      state: "NORMAL",
-      tone: "purple",
+      value: tiltOffline ? "OFFLINE" : tiltDetected ? "TILT DETECTED" : "STABLE",
+      detail: tiltOffline ? "No hardware data" : tiltDetected ? "Tilt detected" : "No tilt detected",
+      state: tiltOffline ? "OFFLINE" : tiltDetected ? "WARNING" : "NORMAL",
+      tone: tiltOffline ? "red" : "purple",
       icon: TriangleAlert,
     },
     {
       id: "vibration",
       name: "VIBRATION (SW-420)",
       code: "",
-      value: "NO VIBRATION",
-      detail: "No vibration detected",
-      state: "NORMAL",
-      tone: "red",
+      value: vibrationOffline ? "OFFLINE" : vibrationDetected ? "VIBRATION DETECTED" : "NO VIBRATION",
+      detail: vibrationOffline ? "No hardware data" : vibrationDetected ? "Vibration detected" : "No vibration detected",
+      state: vibrationOffline ? "OFFLINE" : vibrationDetected ? "WARNING" : "NORMAL",
+      tone: vibrationOffline ? "red" : "red",
       icon: Activity,
     },
   ];
@@ -133,50 +176,58 @@ const buildSensorData = (liveSensors = {}) => {
 const buildMonitoringSensorData = (liveSensors = {}) => {
   const soil = liveSensors.soil ?? {};
   const rain = liveSensors.rain ?? {};
+  const tilt = liveSensors.tilt ?? {};
+  const vibration = liveSensors.vibration ?? {};
   const soilMoisture = Number(soil.moisturePercent ?? 33);
   const rainADC = Number(rain.rawValue ?? 0);
   const soilWarning = soilMoisture >= 70;
   const rainWarning = Number(rainADC) > 0 || String(rain.level ?? "").toLowerCase() !== "dry";
+  const tiltDetected = getDetectionState(tilt, ["tiltDetected", "detected", "level", "value", "status"]);
+  const vibrationDetected = getDetectionState(vibration, ["vibrationDetected", "detected", "level", "value", "status"]);
+  const soilOffline = isSensorOffline(soil);
+  const rainOffline = isSensorOffline(rain);
+  const tiltOffline = isSensorOffline(tilt);
+  const vibrationOffline = isSensorOffline(vibration);
 
   return [
     {
       id: "soil",
       name: "SOIL MOISTURE",
       code: "Capacitive Sensor",
-      value: `${soilMoisture}%`,
-      detail: soilWarning ? "Moisture Level High" : "Moisture Level",
-      state: soilWarning ? "WARNING" : "NORMAL",
-      tone: "green",
+      value: soilOffline ? "OFFLINE" : `${soilMoisture}%`,
+      detail: soilOffline ? "Device unavailable" : soilWarning ? "Moisture Level High" : "Moisture Level",
+      state: soilOffline ? "OFFLINE" : soilWarning ? "WARNING" : "NORMAL",
+      tone: soilOffline ? "red" : "green",
       updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
     },
     {
       id: "rain",
       name: "RAIN (YL-83)",
       code: "ADC Reading",
-      value: rainWarning ? `${rainADC}` : "0",
-      detail: rainWarning ? "Rain Detected (ADC)" : "Dry / No Rain",
-      state: rainWarning ? "WARNING" : "NORMAL",
-      tone: "blue",
+      value: rainOffline ? "OFFLINE" : rainWarning ? `${rainADC}` : "0",
+      detail: rainOffline ? "Device unavailable" : rainWarning ? "Rain Detected (ADC)" : "Dry / No Rain",
+      state: rainOffline ? "OFFLINE" : rainWarning ? "WARNING" : "NORMAL",
+      tone: rainOffline ? "red" : "blue",
       updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
     },
     {
       id: "tilt",
       name: "TILT (SW-520D)",
       code: "Detection",
-      value: "STABLE",
-      detail: "No tilt detected",
-      state: "NORMAL",
-      tone: "purple",
+      value: tiltOffline ? "OFFLINE" : tiltDetected ? "TILT DETECTED" : "STABLE",
+      detail: tiltOffline ? "No hardware data" : tiltDetected ? "Tilt detected" : "No tilt detected",
+      state: tiltOffline ? "OFFLINE" : tiltDetected ? "WARNING" : "NORMAL",
+      tone: tiltOffline ? "red" : "purple",
       updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
     },
     {
       id: "vibration",
       name: "VIBRATION (SW-420)",
       code: "Detection",
-      value: "NO VIBRATION",
-      detail: "No vibration detected",
-      state: "NORMAL",
-      tone: "red",
+      value: vibrationOffline ? "OFFLINE" : vibrationDetected ? "VIBRATION DETECTED" : "NO VIBRATION",
+      detail: vibrationOffline ? "No hardware data" : vibrationDetected ? "Vibration detected" : "No vibration detected",
+      state: vibrationOffline ? "OFFLINE" : vibrationDetected ? "WARNING" : "NORMAL",
+      tone: vibrationOffline ? "red" : "red",
       updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
     },
   ];
@@ -1929,6 +1980,8 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
   });
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
   const [menuAnnouncementId, setMenuAnnouncementId] = useState(null);
+  const [announcementToArchive, setAnnouncementToArchive] = useState(null);
+  const [announcementToRestore, setAnnouncementToRestore] = useState(null);
   const [announcementToDelete, setAnnouncementToDelete] = useState(null);
   const messageEditorRef = useRef(null);
 
@@ -2053,8 +2106,9 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
   }, []);
 
   const displayAnnouncements = announcements.map((row) => {
+    const isArchived = row.status === "Archived";
     const isScheduled = row.status === "Scheduled" || (row.scheduledAt && Number(row.scheduledAt) > Date.now());
-    const computedStatus = isScheduled ? "Scheduled" : "Published";
+    const computedStatus = isArchived ? "Archived" : isScheduled ? "Scheduled" : "Published";
     const typeIcons = {
       "Weather Advisory": CloudRain,
       "Safety Reminder": Shield,
@@ -2145,6 +2199,73 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
     toast.success("Announcement hidden from the app view.", {
       description: "The original Firebase post remains intact.",
     });
+  }, []);
+
+  const handleArchiveAnnouncement = useCallback(async (announcement) => {
+    if (!announcement || !firebaseDatabase) {
+      toast.error("Database is not configured.");
+      return;
+    }
+
+    try {
+      const payload = {
+        title: announcement.title,
+        description: announcement.desc || announcement.description || announcement.message || "",
+        type: announcement.type,
+        priority: announcement.priority,
+        status: "Archived",
+        createdAt: Number(announcement.createdAt || Date.now()),
+        publishedAt: announcement.publishedAt ?? null,
+        scheduledAt: announcement.scheduledAt ?? null,
+        archivedAt: Date.now(),
+      };
+
+      await set(dbRef(firebaseDatabase, `announcements/${announcement.id}`), payload);
+
+      setMenuAnnouncementId(null);
+      setAnnouncementToArchive(null);
+      toast.success("Announcement archived.", {
+        description: "It is hidden from the resident app until restored.",
+      });
+    } catch (error) {
+      toast.error("Unable to archive announcement.", {
+        description: error?.message || "Please try again.",
+      });
+    }
+  }, []);
+
+  const handleRestoreAnnouncement = useCallback(async (announcement) => {
+    if (!announcement || !firebaseDatabase) {
+      toast.error("Database is not configured.");
+      return;
+    }
+
+    try {
+      const nextStatus = announcement.scheduledAt && Number(announcement.scheduledAt) > Date.now() ? "Scheduled" : "Published";
+      const payload = {
+        title: announcement.title,
+        description: announcement.desc || announcement.description || announcement.message || "",
+        type: announcement.type,
+        priority: announcement.priority,
+        status: nextStatus,
+        createdAt: Number(announcement.createdAt || Date.now()),
+        publishedAt: nextStatus === "Published" ? Number(announcement.publishedAt || Date.now()) : null,
+        scheduledAt: nextStatus === "Scheduled" ? Number(announcement.scheduledAt || Date.now()) : null,
+        archivedAt: null,
+      };
+
+      await set(dbRef(firebaseDatabase, `announcements/${announcement.id}`), payload);
+
+      setMenuAnnouncementId(null);
+      setAnnouncementToRestore(null);
+      toast.success("Announcement restored.", {
+        description: "It is active again and visible to residents.",
+      });
+    } catch (error) {
+      toast.error("Unable to restore announcement.", {
+        description: error?.message || "Please try again.",
+      });
+    }
   }, []);
 
   const normalizePastedAnnouncementText = useCallback((rawText = "") => {
@@ -2515,13 +2636,36 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
 
                           {isMenuOpen && (
                             <div className="absolute right-0 top-10 z-20 w-40 rounded-xl border border-[#dfe7e1] bg-white p-2 shadow-[0_14px_30px_rgba(15,23,42,0.12)]">
+                              {row.status === "Archived" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAnnouncementToRestore(row);
+                                    setMenuAnnouncementId(null);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-[#1f2937] hover:bg-[#f8fafc]"
+                                >
+                                  <Archive size={14} /> Restore
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAnnouncementToArchive(row);
+                                    setMenuAnnouncementId(null);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-[#1f2937] hover:bg-[#f8fafc]"
+                                >
+                                  <Archive size={14} /> Archive
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => {
                                   setAnnouncementToDelete(row);
                                   setMenuAnnouncementId(null);
                                 }}
-                                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-[#dc2626] hover:bg-[#fff1f2]"
+                                className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-[#dc2626] hover:bg-[#fff1f2]"
                               >
                                 <Trash2 size={14} /> Delete
                               </button>
@@ -2602,6 +2746,66 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={() => setSelectedAnnouncement(null)} className="rounded-lg border border-[#dfe7e1] bg-white px-4 py-2.5 text-xs font-bold text-[#334155] hover:bg-slate-50 transition">
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {announcementToArchive && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#143a28]/35 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-[#dfe7e1] bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.15)]">
+            <div className="flex items-center gap-3">
+              <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#f0fdf4] text-[#15803d]">
+                <Archive size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-extrabold text-[#111827]">Archive announcement?</h3>
+                <p className="text-xs text-[#64748b]">This will move it to the archived status.</p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-[#dcefe0] bg-[#f7fff9] p-3 text-sm text-[#334155]">
+              <div className="font-bold text-[#111827]">{announcementToArchive.title}</div>
+              <div className="mt-1 text-xs text-[#64748b]">It will remain in Firebase but will no longer be active.</div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setAnnouncementToArchive(null)} className="rounded-lg border border-[#dfe7e1] bg-white px-4 py-2.5 text-xs font-bold text-[#334155] hover:bg-slate-50 transition">
+                Cancel
+              </button>
+              <button type="button" onClick={() => handleArchiveAnnouncement(announcementToArchive)} className="rounded-lg bg-[#15803d] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#166534] transition">
+                Yes, archive
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {announcementToRestore && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#143a28]/35 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-[#dfe7e1] bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.15)]">
+            <div className="flex items-center gap-3">
+              <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#ecfdf5] text-[#15803d]">
+                <Archive size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-extrabold text-[#111827]">Restore announcement?</h3>
+                <p className="text-xs text-[#64748b]">This will make it active again for residents.</p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-[#d7f5df] bg-[#f5fff7] p-3 text-sm text-[#334155]">
+              <div className="font-bold text-[#111827]">{announcementToRestore.title}</div>
+              <div className="mt-1 text-xs text-[#64748b]">It will become visible in the resident-facing app again.</div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setAnnouncementToRestore(null)} className="rounded-lg border border-[#dfe7e1] bg-white px-4 py-2.5 text-xs font-bold text-[#334155] hover:bg-slate-50 transition">
+                Cancel
+              </button>
+              <button type="button" onClick={() => handleRestoreAnnouncement(announcementToRestore)} className="rounded-lg bg-[#15803d] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#166534] transition">
+                Yes, restore
               </button>
             </div>
           </div>
@@ -3597,6 +3801,7 @@ export default function Home() {
     systemMaintenance: false,
     weeklyReports: false,
   };
+  const LAST_SENSOR_ALERT_KEY = "slopesense-last-sensor-alert";
 
   const [page, setPage] = useState(() => {
     const requestedPage = window.location.hash.replace("#", "");
@@ -3626,6 +3831,8 @@ export default function Home() {
   const [liveSensors, setLiveSensors] = useState({
     soil: { moisturePercent: 33, rawValue: 2392, level: "NORMAL", sensorType: "soilMoisture" },
     rain: { rawValue: 0, level: "DRY" },
+    tilt: { tiltDetected: false, level: "STABLE", sensorType: "tilt" },
+    vibration: { vibrationDetected: false, level: "NORMAL", sensorType: "vibration" },
   });
   const [liveNotificationCount, setLiveNotificationCount] = useState(0);
   const [highlightedReportId, setHighlightedReportId] = useState(null);
@@ -3639,12 +3846,31 @@ export default function Home() {
     }
   });
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
-  const lastAlertRef = useRef(null);
+  const getStoredLastSensorAlert = () => {
+    try {
+      return localStorage.getItem(LAST_SENSOR_ALERT_KEY) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const lastAlertRef = useRef(getStoredLastSensorAlert());
   const previousIncidentIdsRef = useRef(new Set());
 
   const unreadNotifications = notifications.filter((notification) => !notification.read).length;
 
   const addNotification = useCallback((title, description, tone = "info", targetPage = "dashboard", reportId = null) => {
+    const isDuplicate = notifications.some(
+      (notification) =>
+        notification.title === title &&
+        notification.description === description &&
+        notification.targetPage === targetPage &&
+        notification.reportId === reportId
+    );
+
+    if (isDuplicate) {
+      return;
+    }
+
     const item = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       title,
@@ -3667,7 +3893,7 @@ export default function Home() {
     } else {
       toast.info(title, { description });
     }
-  }, []);
+  }, [notifications]);
 
   const handleNotificationRead = (id) => {
     setNotifications((previous) =>
@@ -3697,6 +3923,8 @@ export default function Home() {
       const data = snapshot.val() ?? {};
       const soil = data.soilSensor?.latest ?? {};
       const rain = data["slope-01"]?.latest ?? {};
+      const tilt = data.tiltSensor?.latest ?? {};
+      const vibration = data.vibrationSensor?.latest ?? {};
 
       const nextSensors = {
         soil: {
@@ -3708,6 +3936,18 @@ export default function Home() {
         rain: {
           rawValue: Number(rain.rawValue ?? 0),
           level: rain.level ?? "DRY",
+        },
+        tilt: {
+          tiltDetected: getDetectionState(tilt, ["tiltDetected", "detected", "value", "level", "status"]),
+          level: tilt.level ?? (getDetectionState(tilt, ["tiltDetected", "detected", "value", "level", "status"]) ? "TILT DETECTED" : "STABLE"),
+          sensorType: tilt.sensorType ?? "tilt",
+          tiltChange: Number(tilt.tiltChange ?? tilt.changeX ?? tilt.changeY ?? 0),
+        },
+        vibration: {
+          vibrationDetected: getDetectionState(vibration, ["vibrationDetected", "detected", "value", "level", "status"]),
+          level: vibration.level ?? (getDetectionState(vibration, ["vibrationDetected", "detected", "value", "level", "status"]) ? "VIBRATION DETECTED" : "NORMAL"),
+          sensorType: vibration.sensorType ?? "vibration",
+          vibrationValue: Number(vibration.value ?? vibration.rawValue ?? 0),
         },
       };
 
@@ -3730,10 +3970,20 @@ export default function Home() {
         const message = alertMessage.join(" • ");
         if (lastAlertRef.current !== message) {
           lastAlertRef.current = message;
+          try {
+            localStorage.setItem(LAST_SENSOR_ALERT_KEY, message);
+          } catch {
+            // Ignore storage failures for guest/local-only state.
+          }
           addNotification("Sensor notification", message, "warning", "alerts");
         }
       } else if (lastAlertRef.current) {
         lastAlertRef.current = null;
+        try {
+          localStorage.removeItem(LAST_SENSOR_ALERT_KEY);
+        } catch {
+          // Ignore storage failures for guest/local-only state.
+        }
       }
     });
 
