@@ -103,7 +103,7 @@ const getDetectionState = (sensor = {}, candidateFields = []) => {
 const isSensorOffline = (sensor = {}) => {
   if (!sensor || Object.keys(sensor).length === 0) return true;
 
-  const updatedAt = Number(sensor.updatedAt ?? sensor.timestamp ?? 0);
+  const updatedAt = Number(sensor.receivedAt ?? sensor.updatedAt ?? sensor.timestamp ?? 0);
   if (!Number.isFinite(updatedAt) || updatedAt <= 0) {
     return true;
   }
@@ -130,44 +130,44 @@ const buildSensorData = (liveSensors = {}) => {
   return [
     {
       id: "soil",
-      name: "SOIL MOISTURE",
-      code: "(Capacitive Sensor)",
-      value: soilOffline ? "OFFLINE" : `${soilMoisture}%`,
-      detail: soilOffline ? "Device unavailable" : soilWarning ? "Moisture Level High" : "Moisture Level",
+      name: "Soil Moisture",
+      code: "Capacitive sensor",
+      value: soilOffline ? "—" : `${soilMoisture}%`,
+      detail: soilOffline ? "Reading unavailable" : soilWarning ? "High moisture level" : "Current moisture level",
       state: soilOffline ? "OFFLINE" : soilWarning ? "WARNING" : "NORMAL",
-      tone: soilOffline ? "red" : "green",
+      tone: soilOffline ? "neutral" : "green",
       trend: soilOffline ? "No data" : soilWarning ? "Increasing" : "Stable",
       icon: Droplet,
     },
     {
       id: "rain",
-      name: "RAIN (YL-83)",
+      name: "Rain Sensor",
       code: "",
-      value: rainOffline ? "OFFLINE" : rainWarning ? "RAIN DETECTED" : "NO RAIN",
+      value: rainOffline ? "—" : rainWarning ? "Rain detected" : "No rain",
       reading: rainOffline ? "--" : `${rainADC}`,
-      detail: rainOffline ? "Device unavailable" : "Sensor Reading (ADC)",
+      detail: rainOffline ? "Reading unavailable" : "Raw sensor reading (ADC)",
       state: rainOffline ? "OFFLINE" : rainWarning ? "WARNING" : "NORMAL",
-      tone: rainOffline ? "red" : "blue",
+      tone: rainOffline ? "neutral" : "green",
       icon: CloudRain,
     },
     {
       id: "tilt",
-      name: "TILT (SW-520D)",
+      name: "Tilt Sensor",
       code: "",
-      value: tiltOffline ? "OFFLINE" : tiltDetected ? "TILT DETECTED" : "STABLE",
-      detail: tiltOffline ? "No hardware data" : tiltDetected ? "Tilt detected" : "No tilt detected",
+      value: tiltOffline ? "—" : tiltDetected ? "Tilt detected" : "Stable",
+      detail: tiltOffline ? "Reading unavailable" : tiltDetected ? "Movement requires attention" : "No tilt detected",
       state: tiltOffline ? "OFFLINE" : tiltDetected ? "WARNING" : "NORMAL",
-      tone: tiltOffline ? "red" : "purple",
+      tone: tiltOffline ? "neutral" : "green",
       icon: TriangleAlert,
     },
     {
       id: "vibration",
-      name: "VIBRATION (SW-420)",
+      name: "Vibration Sensor",
       code: "",
-      value: vibrationOffline ? "OFFLINE" : vibrationDetected ? "VIBRATION DETECTED" : "NO VIBRATION",
-      detail: vibrationOffline ? "No hardware data" : vibrationDetected ? "Vibration detected" : "No vibration detected",
+      value: vibrationOffline ? "—" : vibrationDetected ? "Vibration detected" : "No vibration",
+      detail: vibrationOffline ? "Reading unavailable" : vibrationDetected ? "Movement requires attention" : "No vibration detected",
       state: vibrationOffline ? "OFFLINE" : vibrationDetected ? "WARNING" : "NORMAL",
-      tone: vibrationOffline ? "red" : "red",
+      tone: vibrationOffline ? "neutral" : "green",
       icon: Activity,
     },
   ];
@@ -192,43 +192,43 @@ const buildMonitoringSensorData = (liveSensors = {}) => {
   return [
     {
       id: "soil",
-      name: "SOIL MOISTURE",
-      code: "Capacitive Sensor",
-      value: soilOffline ? "OFFLINE" : `${soilMoisture}%`,
-      detail: soilOffline ? "Device unavailable" : soilWarning ? "Moisture Level High" : "Moisture Level",
+      name: "Soil Moisture",
+      code: "Moisture reading",
+      value: soilOffline ? "—" : `${soilMoisture}%`,
+      detail: soilOffline ? "Reading unavailable" : soilWarning ? "High moisture level" : "Current moisture level",
       state: soilOffline ? "OFFLINE" : soilWarning ? "WARNING" : "NORMAL",
-      tone: soilOffline ? "red" : "green",
-      updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
+      tone: soilOffline ? "neutral" : "green",
+      updated: soilOffline ? "Unavailable" : new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
     },
     {
       id: "rain",
-      name: "RAIN (YL-83)",
-      code: "ADC Reading",
-      value: rainOffline ? "OFFLINE" : rainWarning ? `${rainADC}` : "0",
-      detail: rainOffline ? "Device unavailable" : rainWarning ? "Rain Detected (ADC)" : "Dry / No Rain",
+      name: "Rain Sensor",
+      code: "Raw ADC reading",
+      value: rainOffline ? "—" : rainWarning ? `${rainADC}` : "0",
+      detail: rainOffline ? "Reading unavailable" : rainWarning ? "Rain detected (ADC)" : "Dry / no rain",
       state: rainOffline ? "OFFLINE" : rainWarning ? "WARNING" : "NORMAL",
-      tone: rainOffline ? "red" : "blue",
-      updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
+      tone: rainOffline ? "neutral" : "green",
+      updated: rainOffline ? "Unavailable" : new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
     },
     {
       id: "tilt",
-      name: "TILT (SW-520D)",
-      code: "Detection",
-      value: tiltOffline ? "OFFLINE" : tiltDetected ? "TILT DETECTED" : "STABLE",
-      detail: tiltOffline ? "No hardware data" : tiltDetected ? "Tilt detected" : "No tilt detected",
+      name: "Tilt Sensor",
+      code: "Movement detection",
+      value: tiltOffline ? "—" : tiltDetected ? "Tilt detected" : "Stable",
+      detail: tiltOffline ? "Reading unavailable" : tiltDetected ? "Movement requires attention" : "No tilt detected",
       state: tiltOffline ? "OFFLINE" : tiltDetected ? "WARNING" : "NORMAL",
-      tone: tiltOffline ? "red" : "purple",
-      updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
+      tone: tiltOffline ? "neutral" : "green",
+      updated: tiltOffline ? "Unavailable" : new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
     },
     {
       id: "vibration",
-      name: "VIBRATION (SW-420)",
-      code: "Detection",
-      value: vibrationOffline ? "OFFLINE" : vibrationDetected ? "VIBRATION DETECTED" : "NO VIBRATION",
-      detail: vibrationOffline ? "No hardware data" : vibrationDetected ? "Vibration detected" : "No vibration detected",
+      name: "Vibration Sensor",
+      code: "Movement detection",
+      value: vibrationOffline ? "—" : vibrationDetected ? "Vibration detected" : "No vibration",
+      detail: vibrationOffline ? "Reading unavailable" : vibrationDetected ? "Movement requires attention" : "No vibration detected",
       state: vibrationOffline ? "OFFLINE" : vibrationDetected ? "WARNING" : "NORMAL",
-      tone: vibrationOffline ? "red" : "red",
-      updated: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
+      tone: vibrationOffline ? "neutral" : "green",
+      updated: vibrationOffline ? "Unavailable" : new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }),
     },
   ];
 };
@@ -236,39 +236,46 @@ const buildMonitoringSensorData = (liveSensors = {}) => {
 const buildRecentReadings = (liveSensors = {}) => {
   const soil = liveSensors.soil ?? {};
   const rain = liveSensors.rain ?? {};
-  const soilMoisture = Number(soil.moisturePercent ?? 33);
+  const tilt = liveSensors.tilt ?? {};
+  const vibration = liveSensors.vibration ?? {};
+  const soilMoisture = Number(soil.moisturePercent ?? 0);
   const rainADC = Number(rain.rawValue ?? 0);
   const rainWarning = Number(rainADC) > 0 || String(rain.level ?? "").toLowerCase() !== "dry";
   const soilWarning = soilMoisture >= 70;
+  const tiltDetected = getDetectionState(tilt, ["tiltDetected", "detected", "value", "level", "status"]);
+  const vibrationDetected = getDetectionState(vibration, ["vibrationDetected", "detected", "value", "level", "status"]);
+  const formatObservedTime = (sensor) => sensor.receivedAt
+    ? new Date(sensor.receivedAt).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })
+    : "Unavailable";
 
   return [
     {
-      time: new Date().toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }),
-      sensor: "Soil Moisture (Capacitive)",
-      reading: `${soilMoisture}%`,
-      status: soilWarning ? "Above threshold" : "Within threshold",
-      condition: soilWarning ? "WARNING" : "NORMAL",
+      time: formatObservedTime(soil),
+      sensor: "Soil Moisture",
+      reading: isSensorOffline(soil) ? "—" : `${soilMoisture}%`,
+      status: isSensorOffline(soil) ? "Reading unavailable" : soilWarning ? "Above threshold" : "Within threshold",
+      condition: isSensorOffline(soil) ? "OFFLINE" : soilWarning ? "WARNING" : "NORMAL",
     },
     {
-      time: new Date().toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }),
-      sensor: "Rain (YL-83)",
-      reading: `${rainADC} (ADC)`,
-      status: rainWarning ? "Rain detected" : "No rainfall",
-      condition: rainWarning ? "WARNING" : "NORMAL",
+      time: formatObservedTime(rain),
+      sensor: "Rain Sensor",
+      reading: isSensorOffline(rain) ? "—" : `${rainADC} (ADC)`,
+      status: isSensorOffline(rain) ? "Reading unavailable" : rainWarning ? "Rain detected" : "No rainfall",
+      condition: isSensorOffline(rain) ? "OFFLINE" : rainWarning ? "WARNING" : "NORMAL",
     },
     {
-      time: new Date().toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }),
-      sensor: "Tilt (SW-520D)",
-      reading: "0 (Stable)",
-      status: "No tilt detected",
-      condition: "NORMAL",
+      time: formatObservedTime(tilt),
+      sensor: "Tilt Sensor",
+      reading: isSensorOffline(tilt) ? "—" : tiltDetected ? "1 (Detected)" : "0 (Stable)",
+      status: isSensorOffline(tilt) ? "Reading unavailable" : tiltDetected ? "Tilt detected" : "No tilt detected",
+      condition: isSensorOffline(tilt) ? "OFFLINE" : tiltDetected ? "WARNING" : "NORMAL",
     },
     {
-      time: new Date().toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }),
-      sensor: "Vibration (SW-420)",
-      reading: "0 (No Vibration)",
-      status: "No vibration detected",
-      condition: "NORMAL",
+      time: formatObservedTime(vibration),
+      sensor: "Vibration Sensor",
+      reading: isSensorOffline(vibration) ? "—" : vibrationDetected ? "1 (Detected)" : "0 (No vibration)",
+      status: isSensorOffline(vibration) ? "Reading unavailable" : vibrationDetected ? "Vibration detected" : "No vibration detected",
+      condition: isSensorOffline(vibration) ? "OFFLINE" : vibrationDetected ? "WARNING" : "NORMAL",
     },
   ];
 };
@@ -325,25 +332,27 @@ function ToneIcon({ type = "info", size = 17 }) {
   return <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${styles[type] || styles.info}`}><Icon size={size} strokeWidth={2} /></span>;
 }
 
-function MetricCard({ icon: Icon, customIcon, tone, label, value, sub, action }) {
+function MetricCard({ icon: Icon, customIcon, tone, label, value, sub, action, onAction }) {
   const toneStyles = {
-    amber: "bg-[#fff1d5] text-[#ef9c11]",
-    blue: "bg-[#eaf2fc] text-[#1e6cd8]",
-    purple: "bg-[#f3e8ff] text-[#7c3aed]",
+    amber: "bg-[#f8f5e9] text-[#7a6a37]",
+    blue: "bg-[#eaf7ee] text-[#276749]",
+    purple: "bg-[#eaf7ee] text-[#276749]",
     red: "bg-[#fdeeed] text-[#e02424]",
     green: "bg-[#eaf7ee] text-[#0e7b42]",
+    neutral: "bg-[#f1f5f9] text-[#64748b]",
   };
   const valueStyles = {
-    amber: "text-[#ef9c11]",
-    blue: "text-[#1e6cd8]",
-    purple: "text-[#7c3aed]",
+    amber: "text-[#27352f]",
+    blue: "text-[#27352f]",
+    purple: "text-[#27352f]",
     red: "text-[#e02424]",
-    green: "text-[#0e7b42]",
+    green: "text-[#27352f]",
+    neutral: "text-[#475569]",
   };
 
   return (
-    <div className="flex min-h-[174px] flex-col rounded-xl border border-[#dfe7e1] bg-white p-5 shadow-[0_4px_14px_rgba(20,61,42,0.035)]">
-      <div className="text-xs font-extrabold uppercase tracking-[0.04em] text-[#27352f]">{label}</div>
+    <div className="dashboard-card flex min-h-[176px] flex-col p-5">
+      <div className="dashboard-eyebrow">{label}</div>
       <div className="mt-4 flex min-w-0 items-center gap-3">
         {customIcon ? (
           customIcon
@@ -353,14 +362,14 @@ function MetricCard({ icon: Icon, customIcon, tone, label, value, sub, action })
           </span>
         ) : null}
         <div className="min-w-0">
-          <div className={`whitespace-nowrap text-2xl font-black leading-tight tracking-tight ${valueStyles[tone] || valueStyles.blue}`}>
+          <div className={`whitespace-nowrap text-2xl font-extrabold leading-tight tracking-tight ${valueStyles[tone] || valueStyles.blue}`}>
             {value}
           </div>
           <p className="mt-1 max-w-[185px] text-xs leading-4 text-[#526057]">{sub}</p>
         </div>
       </div>
       {action && (
-        <button className="mt-auto inline-flex items-center gap-1.5 pt-4 text-xs font-extrabold text-[#087442] hover:underline">
+        <button onClick={onAction} className="mt-auto inline-flex items-center gap-1.5 pt-4 text-xs font-bold text-[#087442] hover:text-[#005c2e] hover:underline">
           {action}
           <ChevronRight size={14} />
         </button>
@@ -374,25 +383,25 @@ function SensorCard({ sensor }) {
   if (sensor.id === "soil" || sensor.name.includes("Soil") || sensor.name.includes("SOIL")) {
     iconElement = (
       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf7ee]">
-        <img src={dashboardIcons.soil} alt="Soil Moisture" className="h-6 w-6 object-contain" />
+        <img src={dashboardIcons.soil} alt="Soil Moisture" className="dashboard-sensor-icon h-6 w-6 object-contain" />
       </span>
     );
   } else if (sensor.id === "rain" || sensor.name.includes("Rain") || sensor.name.includes("RAIN")) {
     iconElement = (
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf2fc]">
-        <img src={dashboardIcons.rain} alt="Rain" className="h-6 w-6 object-contain" />
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf7ee]">
+        <img src={dashboardIcons.rain} alt="Rain" className="dashboard-sensor-icon h-6 w-6 object-contain" />
       </span>
     );
   } else if (sensor.id === "tilt" || sensor.name.includes("Tilt") || sensor.name.includes("TILT")) {
     iconElement = (
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#f3e8ff]">
-        <img src={dashboardIcons.stable} alt="Tilt" className="h-5 w-5 object-contain" />
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf7ee]">
+        <img src={dashboardIcons.stable} alt="Tilt" className="dashboard-sensor-icon h-5 w-5 object-contain" />
       </span>
     );
   } else {
     iconElement = (
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#fdeeed]">
-        <img src={dashboardIcons.vibration} alt="Vibration" className="h-6 w-6 object-contain" />
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf7ee]">
+        <img src={dashboardIcons.vibration} alt="Vibration" className="dashboard-sensor-icon h-6 w-6 object-contain" />
       </span>
     );
   }
@@ -400,31 +409,29 @@ function SensorCard({ sensor }) {
   const isRain = sensor.id === "rain" || sensor.name.includes("RAIN") || sensor.name.includes("Rain");
 
   return (
-    <div className="flex min-h-[224px] flex-col rounded-xl border border-[#dfe7e1] bg-white p-5 shadow-[0_4px_14px_rgba(20,61,42,0.03)]">
+    <div className="dashboard-card flex min-h-[224px] flex-col p-5">
       <div className="flex items-center gap-3">
         {iconElement}
         <div className="min-w-0">
-          <div className="truncate text-xs font-extrabold uppercase tracking-[0.04em] text-[#303d37]">
+          <div className="truncate text-sm font-bold text-[#26352e]">
             {sensor.name}
           </div>
           {sensor.code && <div className="mt-0.5 text-xs text-[#77847c]">{sensor.code}</div>}
         </div>
       </div>
 
-      <div className="mt-5 min-h-[62px]">
+      <div className="mt-5 min-h-[64px]">
         {isRain ? (
           <div>
-            <div className="text-[0.95rem] font-bold uppercase tracking-tight text-[#1e6cd8]">
+            <div className={`text-lg font-extrabold leading-tight ${sensor.state === "OFFLINE" ? "text-[#64748b]" : "text-[#27352f]"}`}>
               {sensor.value}
             </div>
             <div className="mt-0.5 text-xs text-[#55645b]">{sensor.detail}</div>
-            <div className="mt-0.5 text-[0.95rem] font-bold text-[#1e6cd8]">
-              {sensor.reading || "2,740"}
-            </div>
+            {sensor.state !== "OFFLINE" && <div className="mt-0.5 text-base font-bold text-[#27352f]">{sensor.reading}</div>}
           </div>
         ) : sensor.id === "soil" || sensor.name.includes("Soil") ? (
           <div>
-            <div className="text-2xl font-bold leading-tight text-[#0e7b42]">
+            <div className={`text-2xl font-extrabold leading-tight ${sensor.state === "OFFLINE" ? "text-[#64748b]" : "text-[#27352f]"}`}>
               {sensor.value}
             </div>
             <div className="mt-1 text-xs text-[#55645b]">{sensor.detail}</div>
@@ -432,12 +439,10 @@ function SensorCard({ sensor }) {
         ) : (
           <div>
             <div
-              className={`text-[0.95rem] font-bold uppercase tracking-tight ${
-                sensor.tone === "purple"
-                  ? "text-[#6d28d9]"
-                  : sensor.tone === "red"
-                  ? "text-[#e02424]"
-                  : "text-[#0e7b42]"
+              className={`text-lg font-extrabold leading-tight ${
+                sensor.state === "OFFLINE"
+                  ? "text-[#64748b]"
+                  : "text-[#27352f]"
               }`}
             >
               {sensor.value}
@@ -447,11 +452,13 @@ function SensorCard({ sensor }) {
         )}
       </div>
 
-      <div className="mt-3">
+      <div className="mb-4 mt-3">
         <span
-          className={`inline-block rounded px-2.5 py-0.5 text-[0.62rem] font-extrabold tracking-wider ${
-            sensor.state === "WARNING"
-              ? "bg-[#fff3db] text-[#b87500]"
+          className={`status-badge ${
+            sensor.state === "OFFLINE"
+              ? "bg-[#f1f5f9] text-[#475569] ring-1 ring-inset ring-[#cbd5e1]"
+              : sensor.state === "WARNING"
+              ? "bg-[#f8f5e9] text-[#554d35] ring-1 ring-inset ring-[#ded5b5]"
               : "bg-[#eaf7ee] text-[#15803d]"
           }`}
         >
@@ -467,7 +474,7 @@ function SensorCard({ sensor }) {
         ) : (
           <span />
         )}
-        <span className="font-medium text-[#718078]">10:42 AM</span>
+        <span className="font-medium text-[#718078]">{sensor.state === "OFFLINE" ? "Last update unavailable" : "10:42 AM"}</span>
       </div>
     </div>
   );
@@ -478,21 +485,21 @@ function TableHeader({ children }) { return <div className="grid grid-cols-[1.55
 function SensorLegend() {
   const guides = [
     ["soil", "Soil Moisture", "Percentage of water content in soil.", "bg-[#eaf7ee]"],
-    ["rain", "Rain (YL-83)", "Raw ADC reading from rain sensor.", "bg-[#eaf2fc]"],
-    ["stable", "Tilt (SW-520D)", "Detects tilting events.", "bg-[#f3e8ff]"],
-    ["vibration", "Vibration (SW-420)", "Detects vibration events.", "bg-[#fdeeed]"],
+    ["rain", "Rain Sensor", "Measures rainfall using a raw ADC reading.", "bg-[#eaf7ee]"],
+    ["stable", "Tilt Sensor", "Detects changes in slope position.", "bg-[#eaf7ee]"],
+    ["vibration", "Vibration Sensor", "Detects ground vibration events.", "bg-[#eaf7ee]"],
   ];
 
   return (
-    <section className="rounded-xl border border-[#dfe7e1] bg-white p-6 shadow-[0_4px_14px_rgba(20,61,42,0.03)]">
-      <h2 className="text-sm font-extrabold uppercase tracking-wide text-[#27352f]">
-        Sensor Legend / Guide
+    <section className="dashboard-card p-5 sm:p-6">
+      <h2 className="dashboard-section-title">
+        Sensor Guide
       </h2>
       <div className="mt-5 space-y-4">
         {guides.map(([iconKey, name, detail, bgClass]) => (
           <div key={name} className="flex items-center gap-3.5">
             <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${bgClass}`}>
-              <img src={dashboardIcons[iconKey]} alt={name} className="h-6 w-6 object-contain" />
+              <img src={dashboardIcons[iconKey]} alt={name} className="dashboard-sensor-icon h-6 w-6 object-contain" />
             </span>
             <div className="text-xs leading-5">
               <span className="font-bold text-[#1e293b]">{name}:</span>{" "}
@@ -510,35 +517,35 @@ function MonitoringSensorCard({ sensor }) {
   if (sensor.id === "soil") {
     iconElement = (
       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf7ee]">
-        <img src={dashboardIcons.soil} alt="Soil Moisture" className="h-6 w-6 object-contain" />
+        <img src={dashboardIcons.soil} alt="Soil Moisture" className="dashboard-sensor-icon h-6 w-6 object-contain" />
       </span>
     );
   } else if (sensor.id === "rain") {
     iconElement = (
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf2fc]">
-        <img src={dashboardIcons.rain} alt="Rain" className="h-6 w-6 object-contain" />
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf7ee]">
+        <img src={dashboardIcons.rain} alt="Rain" className="dashboard-sensor-icon h-6 w-6 object-contain" />
       </span>
     );
   } else if (sensor.id === "tilt") {
     iconElement = (
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#f3e8ff]">
-        <img src={dashboardIcons.stable} alt="Tilt" className="h-5 w-5 object-contain" />
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf7ee]">
+        <img src={dashboardIcons.stable} alt="Tilt" className="dashboard-sensor-icon h-5 w-5 object-contain" />
       </span>
     );
   } else {
     iconElement = (
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#fdeeed]">
-        <img src={dashboardIcons.vibration} alt="Vibration" className="h-6 w-6 object-contain" />
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf7ee]">
+        <img src={dashboardIcons.vibration} alt="Vibration" className="dashboard-sensor-icon h-6 w-6 object-contain" />
       </span>
     );
   }
 
   return (
-    <div className="flex min-h-[220px] flex-col rounded-xl border border-[#dfe7e1] bg-white p-5 shadow-[0_4px_14px_rgba(20,61,42,0.03)]">
+    <div className="dashboard-card flex min-h-[220px] flex-col p-5">
       <div className="flex items-center gap-3">
         {iconElement}
         <div className="min-w-0">
-          <div className="truncate text-xs font-extrabold uppercase tracking-[0.04em] text-[#303d37]">
+          <div className="truncate text-sm font-bold text-[#26352e]">
             {sensor.name}
           </div>
           <div className="mt-0.5 text-xs text-[#77847c]">{sensor.code}</div>
@@ -547,14 +554,10 @@ function MonitoringSensorCard({ sensor }) {
 
       <div className="mt-5 min-h-[62px]">
         <div
-          className={`text-2xl font-bold leading-tight ${
-            sensor.tone === "green"
-              ? "text-[#0e7b42]"
-              : sensor.tone === "blue"
-              ? "text-[#1e6cd8]"
-              : sensor.tone === "purple"
-              ? "text-[#6d28d9]"
-              : "text-[#e02424]"
+          className={`text-2xl font-extrabold leading-tight ${
+            sensor.state === "OFFLINE"
+              ? "text-[#64748b]"
+              : "text-[#27352f]"
           }`}
         >
           {sensor.value}
@@ -562,11 +565,13 @@ function MonitoringSensorCard({ sensor }) {
         <div className="mt-1 text-xs text-[#55645b]">{sensor.detail}</div>
       </div>
 
-      <div className="mt-3">
+      <div className="mb-4 mt-3">
         <span
-          className={`inline-block rounded px-2.5 py-0.5 text-[0.62rem] font-extrabold tracking-wider ${
-            sensor.state === "WARNING"
-              ? "bg-[#fff3db] text-[#b87500]"
+          className={`status-badge ${
+            sensor.state === "OFFLINE"
+              ? "bg-[#f1f5f9] text-[#475569] ring-1 ring-inset ring-[#cbd5e1]"
+              : sensor.state === "WARNING"
+              ? "bg-[#f8f5e9] text-[#554d35] ring-1 ring-inset ring-[#ded5b5]"
               : "bg-[#eaf7ee] text-[#15803d]"
           }`}
         >
@@ -583,31 +588,58 @@ function MonitoringSensorCard({ sensor }) {
 }
 
 
-function DashboardOverview({ setPage, sensorData, activeAlertCount = 0 }) {
+function DashboardOverview({ setPage, sensorData, activeAlertCount = 0, liveAlerts = [], incidentReports = [] }) {
   const alertLevel = activeAlertCount > 0 ? "WARNING" : "NORMAL";
+  const onlineSensorCount = sensorData.filter((sensor) => sensor.state !== "OFFLINE").length;
+  const recentAlertRows = liveAlerts.slice(0, 3).map((alert) => [
+    alert.title,
+    alert.description,
+    alert.time,
+    alert.id === "ALT-TILT" || alert.id === "ALT-VIBRATION" ? "DANGER" : alert.status === "Resolved" ? "NORMAL" : "WARNING",
+    alert.id === "ALT-TILT" || alert.id === "ALT-VIBRATION" ? "red" : "green",
+  ]);
+  const recentIncidentRows = incidentReports.slice(0, 3).map((report) => [
+    report.title,
+    report.location,
+    report.timestamp > 0
+      ? new Date(report.timestamp).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })
+      : "Time unavailable",
+    String(report.status).toUpperCase(),
+    report.status === "Resolved" ? "green" : "amber",
+  ]);
 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
         <MetricCard
-          customIcon={<img src={dashboardIcons.warning} alt="Current Alert Level" className="h-12 w-12 shrink-0 object-contain" />}
+          customIcon={
+            alertLevel === "WARNING" ? (
+              <img src={dashboardIcons.warning} alt="Warning status" className="h-12 w-12 shrink-0 object-contain" />
+            ) : (
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#eaf7ee] text-[#087442]">
+                <CheckCircle2 size={25} strokeWidth={2.2} aria-hidden="true" />
+              </span>
+            )
+          }
           tone={alertLevel === "WARNING" ? "amber" : "green"}
           label="Current Alert Level"
           value={alertLevel}
           sub={alertLevel === "WARNING" ? "Conditions are becoming concerning. Please monitor closely." : "No active sensor warning detected."}
           action="View Details"
+          onAction={() => setPage("alerts")}
         />
         <MetricCard
           customIcon={
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#fdeeed]">
-              <img src={dashboardIcons.alerts} alt="Active Alerts" className="h-7 w-7 object-contain" />
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#f8f5e9]">
+              <img src={dashboardIcons.alerts} alt="Active Alerts" className="dashboard-sensor-icon h-7 w-7 object-contain" />
             </span>
           }
-          tone="red"
+          tone="amber"
           label="Active Alerts"
           value={String(activeAlertCount)}
           sub={activeAlertCount > 0 ? "Warning Level Alerts" : "No current alerts"}
           action="View Alerts"
+          onAction={() => setPage("alerts")}
         />
         <MetricCard
           customIcon={
@@ -615,23 +647,25 @@ function DashboardOverview({ setPage, sensorData, activeAlertCount = 0 }) {
               <img src={dashboardIcons.sensor} alt="Sensor Status" className="h-7 w-7 object-contain" />
             </span>
           }
-          tone="green"
+          tone={onlineSensorCount === sensorData.length ? "green" : "neutral"}
           label="Sensor Status"
-          value="4 / 4"
-          sub="All sensors are online"
+          value={`${onlineSensorCount} / ${sensorData.length}`}
+          sub={onlineSensorCount === sensorData.length ? "All sensors online" : `${sensorData.length - onlineSensorCount} sensor${sensorData.length - onlineSensorCount === 1 ? "" : "s"} offline`}
           action="View Sensors"
+          onAction={() => setPage("sensors")}
         />
         <MetricCard
           customIcon={
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#eaf2fc]">
-              <img src={dashboardIcons.reports} alt="Incident Reports" className="h-7 w-7 object-contain" />
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#eaf7ee]">
+              <img src={dashboardIcons.reports} alt="Incident Reports" className="dashboard-sensor-icon h-7 w-7 object-contain" />
             </span>
           }
-          tone="blue"
+          tone="green"
           label="Incident Reports"
-          value="3"
-          sub="Total Reports (This Week)"
+          value={String(incidentReports.length)}
+          sub="Total submitted reports"
           action="View Reports"
+          onAction={() => setPage("incidents")}
         />
       </div>
 
@@ -639,7 +673,7 @@ function DashboardOverview({ setPage, sensorData, activeAlertCount = 0 }) {
         <div className="mb-4 flex items-center gap-2.5">
           <SectionPulseIcon className="w-6 h-6 shrink-0 text-[#0e7b42]" />
           <div>
-            <h2 className="text-sm font-extrabold uppercase tracking-wide text-[#27352f]">
+            <h2 className="dashboard-section-title">
               Current Sensor Status
             </h2>
             <p className="mt-0.5 text-[0.7rem] text-[#718078]">
@@ -657,20 +691,12 @@ function DashboardOverview({ setPage, sensorData, activeAlertCount = 0 }) {
       <div className="grid gap-5 md:grid-cols-2">
         <ActivityList
           title="Recent Alerts"
-          rows={[
-            ["High Soil Moisture Detected", "Soil moisture reached 72%", "10:42 AM", "WARNING", "amber"],
-            ["Rain Detected", "YL-83 rain sensor detected rainfall", "10:41 AM", "WARNING", "amber"],
-            ["Tilt Sensor Triggered", "Tilt detected at Station SLOPE-01", "Yesterday, 8:15 PM", "DANGER", "red"],
-          ]}
+          rows={recentAlertRows}
           action={() => setPage("alerts")}
         />
         <ActivityList
           title="Recent Incident Reports"
-          rows={[
-            ["Possible Soil Creep at Sitio East", "Sitio East, Brgy. Malinao", "May 27, 2025 9:15 AM", "PENDING", "amber"],
-            ["Small Rock Fall Near Road", "Sitio West, Brgy. Malinao", "May 26, 2025 4:32 PM", "PENDING", "amber"],
-            ["Crack on Slope Near House", "Purok 3, Brgy. Malinao", "May 25, 2025 11:20 AM", "RESOLVED", "green"],
-          ]}
+          rows={recentIncidentRows}
           action={() => setPage("incidents")}
         />
       </div>
@@ -688,35 +714,35 @@ function ActivityList({ title, rows, action }) {
     if (isIncidentList) {
       return (
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#eaf7ee]">
-          <img src={dashboardIcons.reports} alt="Report" className="h-5 w-5 object-contain" />
+          <img src={dashboardIcons.reports} alt="Report" className="dashboard-sensor-icon h-5 w-5 object-contain" />
         </span>
       );
     }
     if (index === 0) {
       return (
-        <span className="grid h-7 w-7 shrink-0 place-items-center">
-          <img src={dashboardIcons.warning} alt="Warning" className="h-6 w-6 object-contain" />
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#eaf7ee]">
+          <img src={dashboardIcons.warning} alt="Warning" className="dashboard-sensor-icon h-5 w-5 object-contain" />
         </span>
       );
     }
     if (index === 1) {
       return (
-        <span className="grid h-7 w-7 shrink-0 place-items-center">
-          <img src={dashboardIcons.rain} alt="Rain" className="h-6 w-6 object-contain" />
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#eaf7ee]">
+          <img src={dashboardIcons.rain} alt="Rain" className="dashboard-sensor-icon h-5 w-5 object-contain" />
         </span>
       );
     }
     return (
-      <span className="grid h-7 w-7 shrink-0 place-items-center">
-        <img src={dashboardIcons.stable} alt="Tilt" className="h-5 w-5 object-contain" />
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#eaf7ee]">
+        <img src={dashboardIcons.stable} alt="Tilt" className="dashboard-sensor-icon h-5 w-5 object-contain" />
       </span>
     );
   };
 
   return (
-    <section className="rounded-xl border border-[#dfe7e1] bg-white p-5 shadow-[0_4px_14px_rgba(20,61,42,0.025)]">
+    <section className="dashboard-card p-5">
       <div className="flex items-center justify-between border-b border-[#edf0ed] pb-3">
-        <h2 className="text-sm font-extrabold uppercase tracking-[0.025em] text-[#27352f]">
+        <h2 className="dashboard-section-title">
           {title}
         </h2>
         <button onClick={action} className="text-xs font-bold text-[#087442] hover:underline">
@@ -724,21 +750,25 @@ function ActivityList({ title, rows, action }) {
         </button>
       </div>
       <div className="divide-y divide-[#edf0ed]">
-        {rows.map((row, index) => (
+        {rows.length === 0 ? (
+          <div className="flex min-h-[92px] items-center justify-center px-4 py-6 text-center text-xs text-[#64748b]">
+            No Firebase records available.
+          </div>
+        ) : rows.map((row, index) => (
           <div key={row[0]} className="flex min-h-[68px] items-center gap-3 py-3">
             {rowIcon(row, index)}
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-extrabold text-[#3b4942]">{row[0]}</div>
-              <div className="mt-0.5 truncate text-xs text-[#68776e]">{row[1]}</div>
+              <div className="truncate text-sm font-bold text-[#27352f]">{row[0]}</div>
+              <div className="mt-0.5 truncate text-xs text-[#64748b]">{row[1]}</div>
             </div>
             <div className="shrink-0 text-right">
               <span
-                className={`rounded-md px-2 py-0.5 text-[0.62rem] font-extrabold tracking-wider ${
+                className={`status-badge ${
                   row[3] === "DANGER"
-                    ? "bg-[#ffe4e8] text-[#e11d48]"
+                    ? "bg-[#fee2e2] text-[#b91c1c] ring-1 ring-inset ring-[#fecaca]"
                     : row[3] === "WARNING" || row[3] === "PENDING"
-                    ? "bg-[#fff3db] text-[#b87500]"
-                    : "bg-[#eaf7ee] text-[#15803d]"
+                    ? "bg-[#f8f5e9] text-[#554d35] ring-1 ring-inset ring-[#ded5b5]"
+                    : "bg-[#eaf7ee] text-[#276749] ring-1 ring-inset ring-[#cde8d6]"
                 }`}
               >
                 {row[3]}
@@ -765,9 +795,9 @@ function ReferenceChart({ type }) {
       showDots: true,
     },
     rain: {
-      title: "RAIN (YL-83) - ADC READING",
+      title: "RAIN SENSOR - ADC READING",
       legend: "Rain ADC",
-      color: "#1e6cd8",
+      color: "#2f6f4e",
       latest: "Latest: 2,740",
       ticks: ["4000", "3000", "2000", "1000", "0"],
       points: "10,50 30,40 50,56 70,44 90,60 110,48 130,34 150,56 170,42 190,60 210,70 230,54 240,34",
@@ -775,17 +805,17 @@ function ReferenceChart({ type }) {
       showDots: true,
     },
     tilt: {
-      title: "TILT (SW-520D) - DETECTION",
+      title: "TILT SENSOR - DETECTION",
       legend: "Tilt Detected (1=Detected, 0=Stable)",
-      color: "#7c3aed",
+      color: "#2f6f4e",
       latest: "Latest: 0 (Stable)",
       ticks: ["1 (Detected)", "0 (Stable)"],
       event: true,
     },
     vibration: {
-      title: "VIBRATION (SW-420) - DETECTION",
+      title: "VIBRATION SENSOR - DETECTION",
       legend: "Vibration Detected (1=Detected, 0=Stable)",
-      color: "#dc2626",
+      color: "#2f6f4e",
       latest: "Latest: 0 (No Vibration)",
       ticks: ["1 (Detected)", "0 (Stable)"],
       vibration: true,
@@ -848,7 +878,7 @@ function ReferenceChart({ type }) {
 
             {config.event && (
               <>
-                <rect x="120" y="24" width="34" height="94" fill="#a855f7" fillOpacity="0.15" />
+                <rect x="120" y="24" width="34" height="94" fill="#2f6f4e" fillOpacity="0.12" />
                 <rect x="120" y="24" width="34" height="94" fill="none" stroke={config.color} strokeWidth="1.5" />
                 <line x1="10" y1="118" x2="120" y2="118" stroke={config.color} strokeWidth="1.5" />
                 <line x1="154" y1="118" x2="240" y2="118" stroke={config.color} strokeWidth="1.5" />
@@ -886,9 +916,38 @@ function ReferenceChart({ type }) {
   );
 }
 
+function LiveReadingCard({ sensor }) {
+  const offline = !sensor || sensor.state === "OFFLINE";
+
+  return (
+    <div className="dashboard-card flex min-h-[170px] flex-col p-4">
+      <div className="dashboard-eyebrow">{sensor?.name || "Sensor"}</div>
+      <div className="mt-1 text-xs text-[#64748b]">{sensor?.code || "Live Firebase reading"}</div>
+      <div className={`mt-5 text-2xl font-extrabold tracking-tight ${offline ? "text-[#64748b]" : "text-[#27352f]"}`}>
+        {sensor?.value ?? "—"}
+      </div>
+      <div className="mt-1 text-xs leading-5 text-[#64748b]">
+        {sensor?.detail || "No Firebase reading available."}
+      </div>
+      <div className="mt-auto flex items-center justify-between border-t border-[#eef1ee] pt-3 text-xs text-[#718078]">
+        <span>{offline ? "Offline" : "Live snapshot"}</span>
+        <span>{sensor?.updated || "Unavailable"}</span>
+      </div>
+    </div>
+  );
+}
+
 function SensorsPage({ monitoringSensorData = [], recentSensorReadings = [] }) {
   const [selectedSensor, setSelectedSensor] = useState("All Sensors");
-  const [activeTimeRange, setActiveTimeRange] = useState("24H");
+  const sensorLabelById = {
+    soil: "Soil Moisture",
+    rain: "Rain Sensor",
+    tilt: "Tilt Sensor",
+    vibration: "Vibration Sensor",
+  };
+  const visibleSensors = selectedSensor === "All Sensors"
+    ? monitoringSensorData
+    : monitoringSensorData.filter((sensor) => sensorLabelById[sensor.id] === selectedSensor);
 
   return (
     <div className="space-y-6">
@@ -898,11 +957,11 @@ function SensorsPage({ monitoringSensorData = [], recentSensorReadings = [] }) {
         ))}
       </div>
 
-      <section className="rounded-xl border border-[#dfe7e1] bg-white p-6 shadow-[0_4px_14px_rgba(20,61,42,0.03)]">
+      <section className="dashboard-card p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#edf0ed] pb-4">
           <div>
-            <h2 className="text-sm font-extrabold uppercase tracking-wide text-[#27352f]">
-              Sensor Reading History
+            <h2 className="dashboard-section-title">
+              Current Firebase Readings
             </h2>
             <div className="mt-2 flex items-center gap-2 text-xs font-medium text-[#64748b]">
               <span>Select Sensor:</span>
@@ -913,53 +972,39 @@ function SensorsPage({ monitoringSensorData = [], recentSensorReadings = [] }) {
               >
                 <option>All Sensors</option>
                 <option>Soil Moisture</option>
-                <option>Rain (YL-83)</option>
-                <option>Tilt (SW-520D)</option>
-                <option>Vibration (SW-420)</option>
+                <option>Rain Sensor</option>
+                <option>Tilt Sensor</option>
+                <option>Vibration Sensor</option>
               </select>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 rounded-lg border border-[#e2e8f0] p-1 text-xs font-semibold">
-            {["1H", "6H", "24H", "7D"].map((range) => (
-              <button
-                key={range}
-                onClick={() => setActiveTimeRange(range)}
-                className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${
-                  activeTimeRange === range
-                    ? "bg-[#006b37] text-white shadow-sm"
-                    : "text-[#64748b] hover:bg-[#f8fafc] hover:text-[#111827]"
-                }`}
-              >
-                {range}
-              </button>
-            ))}
-          </div>
+          <div className="rounded-full bg-[#eaf7ee] px-3 py-1.5 text-xs font-bold text-[#276749]">Live snapshot</div>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 pt-6 sm:grid-cols-2 lg:grid-cols-4">
-          {["soil", "rain", "tilt", "vibration"].map((type) => (
-            <ReferenceChart key={type} type={type} />
+        <div className="grid grid-cols-1 gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-4">
+          {visibleSensors.map((sensor) => (
+            <LiveReadingCard key={sensor.id} sensor={sensor} />
           ))}
         </div>
 
-        <div className="mt-6 flex items-center gap-2 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-4 py-3 text-xs text-[#64748b]">
+        <div className="mt-6 flex items-start gap-2 rounded-lg border border-[#dfe7e1] bg-[#f6faf7] px-4 py-3 text-xs leading-5 text-[#526057]">
           <Info size={16} className="shrink-0 text-[#087442]" />
           <span>
-            Graphs show the last 24 hours of sensor readings. Soil moisture and rain show continuous values. Tilt and vibration show detection events (1) or normal (0). Data is updated every 1 minute.
+            These values come from each device's latest Firebase record. Historical charts will require the sensor firmware to store timestamped history instead of overwriting only the latest reading.
           </span>
         </div>
       </section>
 
       <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-        <section className="rounded-xl border border-[#dfe7e1] bg-white p-6 shadow-[0_4px_14px_rgba(20,61,42,0.03)]">
-          <h2 className="text-sm font-extrabold uppercase tracking-wide text-[#27352f]">
+        <section className="dashboard-card p-5 sm:p-6">
+          <h2 className="dashboard-section-title">
             Recent Sensor Readings
           </h2>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-[#e5e9e6] pb-3 text-[0.7rem] font-extrabold uppercase tracking-wider text-[#64748b]">
+                <tr className="border-b border-[#e5e9e6] pb-3 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-[#64748b]">
                   <th className="pb-3 pr-4 font-extrabold">Time</th>
                   <th className="pb-3 pr-4 font-extrabold">Sensor</th>
                   <th className="pb-3 pr-4 font-extrabold">Reading</th>
@@ -969,7 +1014,7 @@ function SensorsPage({ monitoringSensorData = [], recentSensorReadings = [] }) {
               </thead>
               <tbody className="divide-y divide-[#f1f5f9]">
                 {recentSensorReadings.map((row) => (
-                  <tr key={row.sensor} className="text-xs text-[#475569]">
+                  <tr key={row.sensor} className="text-xs text-[#475569] hover:bg-[#f8fbf9]">
                     <td className="py-3.5 pr-4 whitespace-nowrap">{row.time}</td>
                     <td className="py-3.5 pr-4 font-bold text-[#1e293b] whitespace-nowrap">{row.sensor}</td>
                     <td className="py-3.5 pr-4 whitespace-nowrap">{row.reading}</td>
@@ -977,8 +1022,10 @@ function SensorsPage({ monitoringSensorData = [], recentSensorReadings = [] }) {
                     <td className="py-3.5 text-right whitespace-nowrap">
                       <span
                         className={`inline-block rounded px-2.5 py-0.5 text-[0.65rem] font-extrabold tracking-wider ${
-                          row.condition === "WARNING"
-                            ? "bg-[#fff3db] text-[#b87500]"
+                          row.condition === "OFFLINE"
+                            ? "bg-[#f1f5f9] text-[#475569] ring-1 ring-inset ring-[#cbd5e1]"
+                            : row.condition === "WARNING"
+                            ? "bg-[#f8f5e9] text-[#554d35] ring-1 ring-inset ring-[#ded5b5]"
                             : "bg-[#eaf7ee] text-[#15803d]"
                         }`}
                       >
@@ -1008,13 +1055,21 @@ function MiniChart({ title, color, values, value }) {
 }
 
 function buildLiveAlertsFromSensors(liveSensors = {}) {
+  if (!Object.values(liveSensors).some((sensor) => sensor && Object.keys(sensor).length > 0)) {
+    return [];
+  }
+
   const soil = liveSensors.soil ?? {};
   const rain = liveSensors.rain ?? {};
+  const tilt = liveSensors.tilt ?? {};
+  const vibration = liveSensors.vibration ?? {};
   const soilMoisture = Number(soil.moisturePercent ?? 0);
   const rainRaw = Number(rain.rawValue ?? 0);
   const rainLevel = String(rain.level ?? "DRY").toUpperCase();
   const soilTriggered = soilMoisture >= 70;
   const rainTriggered = rainRaw > 0 || rainLevel !== "DRY";
+  const tiltTriggered = getDetectionState(tilt, ["tiltDetected", "detected", "value", "level", "status"]);
+  const vibrationTriggered = getDetectionState(vibration, ["vibrationDetected", "detected", "value", "level", "status"]);
 
   const alerts = [];
 
@@ -1051,6 +1106,42 @@ function buildLiveAlertsFromSensors(liveSensors = {}) {
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
       reading: `${rainRaw} ADC`,
       threshold: "0 ADC or dry state",
+    });
+  }
+
+  if (tiltTriggered) {
+    alerts.push({
+      id: "ALT-TILT",
+      title: "Tilt Detected",
+      description: "The tilt sensor detected a change in slope position.",
+      device: "tiltSensor",
+      sensorType: "Tilt Sensor",
+      location: "Barangay Malinao",
+      subLocation: "Slope monitoring area",
+      severity: "CRITICAL",
+      status: "New",
+      date: new Date().toLocaleDateString(),
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      reading: "Detected",
+      threshold: "No movement",
+    });
+  }
+
+  if (vibrationTriggered) {
+    alerts.push({
+      id: "ALT-VIBRATION",
+      title: "Vibration Detected",
+      description: "The vibration sensor detected ground movement.",
+      device: "vibrationSensor",
+      sensorType: "Vibration Sensor",
+      location: "Barangay Malinao",
+      subLocation: "Slope monitoring area",
+      severity: "CRITICAL",
+      status: "New",
+      date: new Date().toLocaleDateString(),
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      reading: "Detected",
+      threshold: "No movement",
     });
   }
 
@@ -3828,13 +3919,9 @@ export default function Home() {
       return defaultPreferences;
     }
   });
-  const [liveSensors, setLiveSensors] = useState({
-    soil: { moisturePercent: 33, rawValue: 2392, level: "NORMAL", sensorType: "soilMoisture" },
-    rain: { rawValue: 0, level: "DRY" },
-    tilt: { tiltDetected: false, level: "STABLE", sensorType: "tilt" },
-    vibration: { vibrationDetected: false, level: "NORMAL", sensorType: "vibration" },
-  });
+  const [liveSensors, setLiveSensors] = useState({});
   const [liveNotificationCount, setLiveNotificationCount] = useState(0);
+  const [dashboardIncidentReports, setDashboardIncidentReports] = useState([]);
   const [highlightedReportId, setHighlightedReportId] = useState(null);
   const [userMap, setUserMap] = useState({});
   const [notifications, setNotifications] = useState(() => {
@@ -3926,36 +4013,53 @@ export default function Home() {
       const tilt = data.tiltSensor?.latest ?? {};
       const vibration = data.vibrationSensor?.latest ?? {};
 
+      if (![soil, rain, tilt, vibration].some((sensor) => Object.keys(sensor).length > 0)) {
+        setLiveSensors({});
+        setLiveNotificationCount(0);
+        return;
+      }
+
+      const receivedAt = Date.now();
       const nextSensors = {
-        soil: {
-          moisturePercent: Number(soil.moisturePercent ?? 33),
-          rawValue: Number(soil.rawValue ?? 2392),
+        soil: Object.keys(soil).length === 0 ? {} : {
+          moisturePercent: Number(soil.moisturePercent ?? 0),
+          rawValue: Number(soil.rawValue ?? 0),
           level: soil.level ?? "NORMAL",
           sensorType: soil.sensorType ?? "soilMoisture",
+          updatedAt: Number(soil.updatedAt ?? soil.timestamp ?? 0),
+          receivedAt,
         },
-        rain: {
+        rain: Object.keys(rain).length === 0 ? {} : {
           rawValue: Number(rain.rawValue ?? 0),
           level: rain.level ?? "DRY",
+          updatedAt: Number(rain.updatedAt ?? rain.timestamp ?? 0),
+          receivedAt,
         },
-        tilt: {
+        tilt: Object.keys(tilt).length === 0 ? {} : {
           tiltDetected: getDetectionState(tilt, ["tiltDetected", "detected", "value", "level", "status"]),
           level: tilt.level ?? (getDetectionState(tilt, ["tiltDetected", "detected", "value", "level", "status"]) ? "TILT DETECTED" : "STABLE"),
           sensorType: tilt.sensorType ?? "tilt",
           tiltChange: Number(tilt.tiltChange ?? tilt.changeX ?? tilt.changeY ?? 0),
+          updatedAt: Number(tilt.updatedAt ?? tilt.timestamp ?? 0),
+          receivedAt,
         },
-        vibration: {
+        vibration: Object.keys(vibration).length === 0 ? {} : {
           vibrationDetected: getDetectionState(vibration, ["vibrationDetected", "detected", "value", "level", "status"]),
           level: vibration.level ?? (getDetectionState(vibration, ["vibrationDetected", "detected", "value", "level", "status"]) ? "VIBRATION DETECTED" : "NORMAL"),
           sensorType: vibration.sensorType ?? "vibration",
           vibrationValue: Number(vibration.value ?? vibration.rawValue ?? 0),
+          updatedAt: Number(vibration.updatedAt ?? vibration.timestamp ?? 0),
+          receivedAt,
         },
       };
 
       setLiveSensors(nextSensors);
 
-      const soilTriggered = Number(nextSensors.soil.moisturePercent) >= 70;
-      const rainTriggered = Number(nextSensors.rain.rawValue) > 0 || String(nextSensors.rain.level).toLowerCase() !== "dry";
-      const alertCount = (soilTriggered ? 1 : 0) + (rainTriggered ? 1 : 0);
+      const soilTriggered = Object.keys(nextSensors.soil).length > 0 && Number(nextSensors.soil.moisturePercent) >= 70;
+      const rainTriggered = Object.keys(nextSensors.rain).length > 0 && (Number(nextSensors.rain.rawValue) > 0 || String(nextSensors.rain.level).toLowerCase() !== "dry");
+      const tiltTriggered = Boolean(nextSensors.tilt.tiltDetected);
+      const vibrationTriggered = Boolean(nextSensors.vibration.vibrationDetected);
+      const alertCount = (soilTriggered ? 1 : 0) + (rainTriggered ? 1 : 0) + (tiltTriggered ? 1 : 0) + (vibrationTriggered ? 1 : 0);
       setLiveNotificationCount(alertCount);
 
       const alertMessage = [];
@@ -3964,6 +4068,12 @@ export default function Home() {
       }
       if (rainTriggered) {
         alertMessage.push(`Rain sensor detected: ${nextSensors.rain.rawValue} ADC`);
+      }
+      if (tiltTriggered) {
+        alertMessage.push("Tilt sensor detected movement");
+      }
+      if (vibrationTriggered) {
+        alertMessage.push("Vibration sensor detected movement");
       }
 
       if (alertMessage.length > 0) {
@@ -4011,6 +4121,17 @@ export default function Home() {
     const unsubscribe = onValue(reportsRef, (snapshot) => {
       const value = snapshot.val() ?? {};
       const reportIds = Object.keys(value);
+      const dashboardReports = Object.entries(value)
+        .map(([id, item]) => ({
+          id,
+          title: item?.incidentType || "Incident report",
+          description: item?.description || "No description provided.",
+          location: item?.location || "Location unavailable",
+          status: item?.status || "Pending",
+          timestamp: Number(item?.timestamp ?? 0),
+        }))
+        .sort((a, b) => b.timestamp - a.timestamp);
+      setDashboardIncidentReports(dashboardReports);
       const newReportIds = reportIds.filter((id) => !previousIncidentIdsRef.current.has(id));
 
       if (newReportIds.length > 0) {
@@ -4217,7 +4338,15 @@ export default function Home() {
                     </button>
                   )}
                 </div>
-                {page === "dashboard" && <DashboardOverview setPage={setPage} sensorData={sensorData} activeAlertCount={liveNotificationCount} />}
+                {page === "dashboard" && (
+                  <DashboardOverview
+                    setPage={setPage}
+                    sensorData={sensorData}
+                    activeAlertCount={liveNotificationCount}
+                    liveAlerts={buildLiveAlertsFromSensors(liveSensors)}
+                    incidentReports={dashboardIncidentReports}
+                  />
+                )}
                 {page === "sensors" && (
                   <SensorsPage
                     monitoringSensorData={monitoringSensorData}
