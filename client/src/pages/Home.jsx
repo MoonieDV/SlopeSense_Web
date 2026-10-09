@@ -782,7 +782,7 @@ function ActivityList({ title, rows, action }) {
   );
 }
 
-function ReferenceChart({ type }) {
+function LegacyReferenceChart({ type }) {
   const config = {
     soil: {
       title: "SOIL MOISTURE (%)",
@@ -916,6 +916,140 @@ function ReferenceChart({ type }) {
   );
 }
 
+function MonitoringThresholdGuide() {
+  const groups = [
+    {
+      title: "Soil Moisture",
+      icon: Droplet,
+      ranges: ["Below 40% · Normal", "40–59% · Caution", "60–79% · Warning", "80% or higher · Danger"],
+    },
+    {
+      title: "Rainfall (0–1023 ADC)",
+      icon: CloudRain,
+      ranges: ["0–300 · Dry", "301–600 · Light", "601–800 · Moderate", "801–1023 · Heavy"],
+    },
+    {
+      title: "Tilt and Vibration",
+      icon: Activity,
+      ranges: ["Stable · No movement detected", "Detected · Warning indicator"],
+    },
+  ];
+
+  return (
+    <section className="dashboard-card p-5 sm:p-6">
+      <h2 className="dashboard-section-title">Monitoring Threshold Guide</h2>
+      <div className="mt-4 space-y-4">
+        {groups.map(({ title, icon: Icon, ranges }) => (
+          <div key={title} className="rounded-lg border border-[#e5ebe7] bg-[#fafcfb] p-3.5">
+            <div className="flex items-center gap-2 text-sm font-bold text-[#27352f]">
+              <Icon size={16} className="text-[#2f6f4e]" />
+              {title}
+            </div>
+            <ul className="mt-2 space-y-1.5 text-xs leading-5 text-[#64748b]">
+              {ranges.map((range) => (
+                <li key={range} className="flex gap-2">
+                  <span className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${range.includes("Danger") ? "bg-[#b91c1c]" : "bg-[#5f806d]"}`} />
+                  <span>{range}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 rounded-lg border border-[#dfe7e1] bg-[#f6faf7] p-3 text-xs leading-5 text-[#526057]">
+        Sensor classifications describe individual readings. The overall system reaches Danger only when the configured alert logic identifies a critical condition.
+      </div>
+    </section>
+  );
+}
+
+const historyTypeAliases = {
+  soil: ["soil", "soilSensor", "soilMoisture"],
+  rain: ["rain", "rainSensor", "slope-01"],
+  tilt: ["tilt", "tiltSensor"],
+  vibration: ["vibration", "vibrationSensor"],
+};
+
+const getHistoryTimestamp = (record = {}) => {
+  const value = Number(record.timestamp ?? record.createdAt ?? record.recordedAt ?? record.time ?? 0);
+  return value > 0 && value < 1e12 ? value * 1000 : value;
+};
+
+const getHistoryValue = (type, record = {}) => {
+  if (type === "soil") return Number(record.moisturePercent ?? record.value ?? 0);
+  if (type === "rain") return Number(record.rawValue ?? record.value ?? 0);
+  if (type === "tilt") return getDetectionState(record, ["tiltDetected", "detected", "value", "level", "status"]) ? 1 : 0;
+  return getDetectionState(record, ["vibrationDetected", "detected", "value", "level", "status"]) ? 1 : 0;
+};
+
+const normalizeSensorHistory = (value = {}) => Object.fromEntries(
+  Object.entries(historyTypeAliases).map(([type, aliases]) => {
+    const source = aliases.map((alias) => value?.[alias]).find(Boolean) ?? {};
+    const recordsSource = source.history ?? source.readings ?? source;
+    const records = (Array.isArray(recordsSource) ? recordsSource : Object.values(recordsSource ?? {}))
+      .filter((record) => record && typeof record === "object" && getHistoryTimestamp(record) > 0)
+      .sort((a, b) => getHistoryTimestamp(a) - getHistoryTimestamp(b));
+    return [type, records];
+  })
+);
+
+function ReferenceChart({ type, records = [] }) {
+  const config = {
+    soil: { title: "Soil Moisture Trend", label: "Moisture (%)", max: 100, ticks: ["100%", "50%", "0%"] },
+    rain: { title: "Rainfall History", label: "Rainfall (ADC)", max: 1023, ticks: ["1023", "512", "0"] },
+    tilt: { title: "Slope Movement Events", label: "Stable / detected", max: 1, ticks: ["Detected", "Stable"] },
+    vibration: { title: "Ground Vibration Events", label: "Stable / detected", max: 1, ticks: ["Detected", "Stable"] },
+  }[type];
+  const values = records.map((record) => ({ timestamp: getHistoryTimestamp(record), value: getHistoryValue(type, record) })).filter((record) => record.timestamp > 0);
+  const start = values[0]?.timestamp ?? 0;
+  const end = values.at(-1)?.timestamp ?? start;
+  const span = Math.max(end - start, 1);
+  const points = values.map((record) => {
+    const x = 10 + ((record.timestamp - start) / span) * 230;
+    const y = 112 - (Math.min(Math.max(record.value, 0), config.max) / config.max) * 96;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  return (
+    <div className="dashboard-card flex min-h-[250px] min-w-0 flex-col p-4">
+      <div className="text-center text-sm font-bold text-[#27352f]">{config.title}</div>
+      <div className="mt-1 flex items-center justify-center gap-1.5 text-xs text-[#64748b]">
+        <span className="h-2 w-2 rounded-full bg-[#2f6f4e]" />
+        <span>{config.label}</span>
+      </div>
+      {values.length === 0 ? (
+        <div className="mt-4 flex flex-1 items-center justify-center rounded-lg border border-dashed border-[#d7e1da] bg-[#f8fbf9] px-4 text-center text-xs leading-5 text-[#64748b]">
+          No timestamped Firebase history for this period.
+        </div>
+      ) : (
+        <div className="mt-4 flex flex-1 gap-3">
+          <div className="flex h-[150px] w-14 shrink-0 flex-col justify-between py-1 text-right text-[10px] font-medium text-[#64748b]">
+            {config.ticks.map((tick) => <span key={tick}>{tick}</span>)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <svg viewBox="0 0 250 120" className="h-[150px] w-full" preserveAspectRatio="none" aria-label={`${config.title} chart`}>
+              <g stroke="#e8eeea" strokeWidth="1">
+                <line x1="10" y1="16" x2="240" y2="16" />
+                <line x1="10" y1="64" x2="240" y2="64" />
+                <line x1="10" y1="112" x2="240" y2="112" />
+              </g>
+              <polyline points={points} fill="none" stroke="#2f6f4e" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+              {values.map((record, index) => {
+                const [cx, cy] = points.split(" ")[index].split(",");
+                return <circle key={`${record.timestamp}-${index}`} cx={cx} cy={cy} r="3" fill="#2f6f4e" />;
+              })}
+            </svg>
+            <div className="mt-1 flex justify-between text-[10px] text-[#718078]">
+              <span>{new Date(start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+              <span>{new Date(end).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LiveReadingCard({ sensor }) {
   const offline = !sensor || sensor.state === "OFFLINE";
 
@@ -937,17 +1071,57 @@ function LiveReadingCard({ sensor }) {
   );
 }
 
-function SensorsPage({ monitoringSensorData = [], recentSensorReadings = [] }) {
-  const [selectedSensor, setSelectedSensor] = useState("All Sensors");
-  const sensorLabelById = {
-    soil: "Soil Moisture",
-    rain: "Rain Sensor",
-    tilt: "Tilt Sensor",
-    vibration: "Vibration Sensor",
+const soilClassification = (value) => value >= 80 ? "Danger" : value >= 60 ? "Warning" : value >= 40 ? "Caution" : "Normal";
+const rainClassification = (value) => value >= 801 ? "Heavy" : value >= 601 ? "Moderate" : value >= 301 ? "Light" : "Dry";
+
+const buildEnvironmentalEvents = (history = {}) => {
+  const events = [];
+  const addTransitions = (type, classify, label, reading) => {
+    let previous = null;
+    (history[type] ?? []).forEach((record) => {
+      const current = classify(getHistoryValue(type, record));
+      if (previous !== null && current !== previous) {
+        events.push({
+          timestamp: getHistoryTimestamp(record),
+          event: `${label} changed from ${previous} to ${current}`,
+          reading: reading(getHistoryValue(type, record), current),
+          status: current === "Danger" ? "DANGER" : current === "Normal" || current === "Dry" ? "NORMAL" : "WARNING",
+        });
+      }
+      previous = current;
+    });
   };
-  const visibleSensors = selectedSensor === "All Sensors"
-    ? monitoringSensorData
-    : monitoringSensorData.filter((sensor) => sensorLabelById[sensor.id] === selectedSensor);
+
+  addTransitions("soil", soilClassification, "Soil moisture", (value, status) => `${value}% · ${status}`);
+  addTransitions("rain", rainClassification, "Rainfall", (value, status) => `${value} ADC · ${status}`);
+
+  ["tilt", "vibration"].forEach((type) => {
+    let previouslyDetected = false;
+    (history[type] ?? []).forEach((record) => {
+      const detected = getHistoryValue(type, record) === 1;
+      if (detected && !previouslyDetected) {
+        events.push({
+          timestamp: getHistoryTimestamp(record),
+          event: type === "tilt" ? "Slope movement detected" : "Ground vibration detected",
+          reading: "Detected",
+          status: "WARNING",
+        });
+      }
+      previouslyDetected = detected;
+    });
+  });
+
+  return events.filter((event) => event.timestamp > 0).sort((a, b) => b.timestamp - a.timestamp);
+};
+
+function SensorsPage({ monitoringSensorData = [], sensorHistory = {} }) {
+  const [activeTimeRange, setActiveTimeRange] = useState("24H");
+  const rangeMilliseconds = { "1H": 60 * 60 * 1000, "6H": 6 * 60 * 60 * 1000, "24H": 24 * 60 * 60 * 1000, "7D": 7 * 24 * 60 * 60 * 1000 };
+  const cutoff = Date.now() - rangeMilliseconds[activeTimeRange];
+  const filteredHistory = Object.fromEntries(
+    Object.keys(historyTypeAliases).map((type) => [type, (sensorHistory[type] ?? []).filter((record) => getHistoryTimestamp(record) >= cutoff)])
+  );
+  const environmentalEvents = buildEnvironmentalEvents(sensorHistory);
 
   return (
     <div className="space-y-6">
@@ -961,37 +1135,30 @@ function SensorsPage({ monitoringSensorData = [], recentSensorReadings = [] }) {
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#edf0ed] pb-4">
           <div>
             <h2 className="dashboard-section-title">
-              Current Firebase Readings
+              Sensor Reading History
             </h2>
-            <div className="mt-2 flex items-center gap-2 text-xs font-medium text-[#64748b]">
-              <span>Select Sensor:</span>
-              <select
-                value={selectedSensor}
-                onChange={(e) => setSelectedSensor(e.target.value)}
-                className="rounded-lg border border-[#dce4df] bg-white px-3 py-1.5 text-xs font-semibold text-[#1e293b] outline-none hover:border-[#087442] focus:border-[#087442] transition"
-              >
-                <option>All Sensors</option>
-                <option>Soil Moisture</option>
-                <option>Rain Sensor</option>
-                <option>Tilt Sensor</option>
-                <option>Vibration Sensor</option>
-              </select>
-            </div>
+            <p className="mt-1 text-xs text-[#64748b]">Timestamped Firebase readings for the selected period.</p>
           </div>
 
-          <div className="rounded-full bg-[#eaf7ee] px-3 py-1.5 text-xs font-bold text-[#276749]">Live snapshot</div>
+          <div className="flex items-center gap-1.5 rounded-lg border border-[#dfe7e1] bg-white p-1">
+            {["1H", "6H", "24H", "7D"].map((range) => (
+              <button key={range} onClick={() => setActiveTimeRange(range)} className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${activeTimeRange === range ? "bg-[#006b37] text-white shadow-sm" : "text-[#64748b] hover:bg-[#f3f7f4]"}`}>
+                {range}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-4">
-          {visibleSensors.map((sensor) => (
-            <LiveReadingCard key={sensor.id} sensor={sensor} />
+          {["soil", "rain", "tilt", "vibration"].map((type) => (
+            <ReferenceChart key={type} type={type} records={filteredHistory[type]} />
           ))}
         </div>
 
         <div className="mt-6 flex items-start gap-2 rounded-lg border border-[#dfe7e1] bg-[#f6faf7] px-4 py-3 text-xs leading-5 text-[#526057]">
           <Info size={16} className="shrink-0 text-[#087442]" />
           <span>
-            These values come from each device's latest Firebase record. Historical charts will require the sensor firmware to store timestamped history instead of overwriting only the latest reading.
+            Charts use timestamped Firebase history only. If a period is empty, no stored readings were available for that range.
           </span>
         </div>
       </section>
@@ -999,37 +1166,37 @@ function SensorsPage({ monitoringSensorData = [], recentSensorReadings = [] }) {
       <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <section className="dashboard-card p-5 sm:p-6">
           <h2 className="dashboard-section-title">
-            Recent Sensor Readings
+            Environmental Event History
           </h2>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-[#e5e9e6] pb-3 text-[0.68rem] font-bold uppercase tracking-[0.06em] text-[#64748b]">
                   <th className="pb-3 pr-4 font-extrabold">Time</th>
-                  <th className="pb-3 pr-4 font-extrabold">Sensor</th>
-                  <th className="pb-3 pr-4 font-extrabold">Reading</th>
-                  <th className="pb-3 pr-4 font-extrabold">Status</th>
-                  <th className="pb-3 text-right font-extrabold">Condition</th>
+                  <th className="pb-3 pr-4 font-extrabold">Event</th>
+                  <th className="pb-3 pr-4 font-extrabold">Reading / Condition</th>
+                  <th className="pb-3 text-right font-extrabold">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f1f5f9]">
-                {recentSensorReadings.map((row) => (
-                  <tr key={row.sensor} className="text-xs text-[#475569] hover:bg-[#f8fbf9]">
-                    <td className="py-3.5 pr-4 whitespace-nowrap">{row.time}</td>
-                    <td className="py-3.5 pr-4 font-bold text-[#1e293b] whitespace-nowrap">{row.sensor}</td>
+                {environmentalEvents.length === 0 ? (
+                  <tr><td colSpan={4} className="py-10 text-center text-xs text-[#64748b]">No meaningful environmental events are stored in Firebase yet.</td></tr>
+                ) : environmentalEvents.map((row) => (
+                  <tr key={`${row.timestamp}-${row.event}`} className="text-xs text-[#475569] hover:bg-[#f8fbf9]">
+                    <td className="py-3.5 pr-4 whitespace-nowrap">{new Date(row.timestamp).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</td>
+                    <td className="py-3.5 pr-4 font-bold text-[#1e293b]">{row.event}</td>
                     <td className="py-3.5 pr-4 whitespace-nowrap">{row.reading}</td>
-                    <td className="py-3.5 pr-4 whitespace-nowrap">{row.status}</td>
                     <td className="py-3.5 text-right whitespace-nowrap">
                       <span
                         className={`inline-block rounded px-2.5 py-0.5 text-[0.65rem] font-extrabold tracking-wider ${
-                          row.condition === "OFFLINE"
-                            ? "bg-[#f1f5f9] text-[#475569] ring-1 ring-inset ring-[#cbd5e1]"
-                            : row.condition === "WARNING"
+                          row.status === "DANGER"
+                            ? "bg-[#fee2e2] text-[#b91c1c] ring-1 ring-inset ring-[#fecaca]"
+                            : row.status === "WARNING"
                             ? "bg-[#f8f5e9] text-[#554d35] ring-1 ring-inset ring-[#ded5b5]"
                             : "bg-[#eaf7ee] text-[#15803d]"
                         }`}
                       >
-                        {row.condition}
+                        {row.status}
                       </span>
                     </td>
                   </tr>
@@ -1039,12 +1206,12 @@ function SensorsPage({ monitoringSensorData = [], recentSensorReadings = [] }) {
           </div>
           <div className="mt-6 flex justify-center">
             <button className="inline-flex items-center gap-2 rounded-lg border border-[#dfe7e1] bg-white px-5 py-2.5 text-xs font-bold text-[#27352f] shadow-sm hover:bg-[#f8fafc] transition">
-              View All Sensor Readings <ChevronRight size={14} />
+              View Complete Sensor History <ChevronRight size={14} />
             </button>
           </div>
         </section>
 
-        <SensorLegend />
+        <MonitoringThresholdGuide />
       </div>
     </div>
   );
@@ -3921,6 +4088,7 @@ export default function Home() {
   });
   const [liveSensors, setLiveSensors] = useState({});
   const [liveNotificationCount, setLiveNotificationCount] = useState(0);
+  const [sensorHistory, setSensorHistory] = useState({ soil: [], rain: [], tilt: [], vibration: [] });
   const [dashboardIncidentReports, setDashboardIncidentReports] = useState([]);
   const [highlightedReportId, setHighlightedReportId] = useState(null);
   const [userMap, setUserMap] = useState({});
@@ -4008,10 +4176,20 @@ export default function Home() {
     const sensorRef = dbRef(firebaseDatabase, "sensors");
     const unsubscribe = onValue(sensorRef, (snapshot) => {
       const data = snapshot.val() ?? {};
-      const soil = data.soilSensor?.latest ?? {};
-      const rain = data["slope-01"]?.latest ?? {};
-      const tilt = data.tiltSensor?.latest ?? {};
-      const vibration = data.vibrationSensor?.latest ?? {};
+      const findLatestSensor = (preferredIds, sensorTypes) => {
+        for (const id of preferredIds) {
+          if (data[id]?.latest) return data[id].latest;
+        }
+
+        const matchingDevice = Object.values(data).find((device) =>
+          sensorTypes.includes(String(device?.latest?.sensorType ?? "").toLowerCase())
+        );
+        return matchingDevice?.latest ?? {};
+      };
+      const soil = findLatestSensor(["soilSensor"], ["soilmoisture", "soil"]);
+      const rain = findLatestSensor(["rainSensor", "slope-01"], ["rain"]);
+      const tilt = findLatestSensor(["tiltSensor"], ["tilt"]);
+      const vibration = findLatestSensor(["vibrationSensor"], ["vibration"]);
 
       if (![soil, rain, tilt, vibration].some((sensor) => Object.keys(sensor).length > 0)) {
         setLiveSensors({});
@@ -4095,10 +4273,31 @@ export default function Home() {
           // Ignore storage failures for guest/local-only state.
         }
       }
+    }, (error) => {
+      console.error("Unable to read Firebase sensor data:", error);
+      setLiveSensors({});
+      setLiveNotificationCount(0);
+      toast.error("Sensor connection unavailable", {
+        description: "Firebase rejected the sensor data request. Check the deployed environment variables and Realtime Database read rules.",
+      });
     });
 
     return () => unsubscribe();
   }, [addNotification]);
+
+  useEffect(() => {
+    if (!firebaseDatabase) return;
+
+    const historyRef = dbRef(firebaseDatabase, "sensorHistory");
+    const unsubscribe = onValue(historyRef, (snapshot) => {
+      setSensorHistory(normalizeSensorHistory(snapshot.val() ?? {}));
+    }, (error) => {
+      console.error("Unable to read Firebase sensor history:", error);
+      setSensorHistory({ soil: [], rain: [], tilt: [], vibration: [] });
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (!firebaseDatabase) return;
@@ -4158,7 +4357,6 @@ export default function Home() {
   const [title, subtitle] = pageMeta[page];
   const sensorData = buildSensorData(liveSensors);
   const monitoringSensorData = buildMonitoringSensorData(liveSensors);
-  const recentSensorReadings = buildRecentReadings(liveSensors);
   const shouldShowAlertBadge = unreadNotifications > 0;
   return (
     <div className="min-h-screen bg-[#f7f9f7] text-[#27352f]">
@@ -4350,7 +4548,7 @@ export default function Home() {
                 {page === "sensors" && (
                   <SensorsPage
                     monitoringSensorData={monitoringSensorData}
-                    recentSensorReadings={recentSensorReadings}
+                    sensorHistory={sensorHistory}
                   />
                 )}
                 {page === "alerts" && (
