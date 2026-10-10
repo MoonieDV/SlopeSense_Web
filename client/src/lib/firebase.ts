@@ -6,12 +6,13 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const readEnv = (value: string | undefined) => value?.trim().replace(/^(['"])(.*)\1$/, "$2") || undefined;
+const publicDatabaseUrl = "https://slopesense-ec686-default-rtdb.asia-southeast1.firebasedatabase.app";
 
 const firebaseConfig = {
   apiKey: readEnv(import.meta.env.VITE_FIREBASE_API_KEY),
   authDomain: readEnv(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN),
   projectId: readEnv(import.meta.env.VITE_FIREBASE_PROJECT_ID),
-  databaseURL: readEnv(import.meta.env.VITE_FIREBASE_DATABASE_URL),
+  databaseURL: readEnv(import.meta.env.VITE_FIREBASE_DATABASE_URL) || publicDatabaseUrl,
   storageBucket: readEnv(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET),
   messagingSenderId: readEnv(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID),
   appId: readEnv(import.meta.env.VITE_FIREBASE_APP_ID),
@@ -22,7 +23,6 @@ const requiredFirebaseConfig = {
   VITE_FIREBASE_API_KEY: firebaseConfig.apiKey,
   VITE_FIREBASE_AUTH_DOMAIN: firebaseConfig.authDomain,
   VITE_FIREBASE_PROJECT_ID: firebaseConfig.projectId,
-  VITE_FIREBASE_DATABASE_URL: firebaseConfig.databaseURL,
   VITE_FIREBASE_APP_ID: firebaseConfig.appId,
 };
 
@@ -44,9 +44,20 @@ export const firebaseApp = hasFirebaseConfig
     : initializeApp(firebaseConfig)
   : null;
 
+const databaseOnlyApp = firebaseApp
+  ? firebaseApp
+  : getApps().find((app) => app.name === "slopesense-public-database") ??
+    initializeApp(
+      {
+        projectId: firebaseConfig.projectId || "slopesense-ec686",
+        databaseURL: firebaseConfig.databaseURL,
+      },
+      "slopesense-public-database"
+    );
+
 export const firebaseAuth = firebaseApp ? getAuth(firebaseApp) : null;
 export const firebaseDb = firebaseApp ? getFirestore(firebaseApp) : null;
-export const firebaseDatabase = firebaseApp ? getDatabase(firebaseApp) : null;
+export const firebaseDatabase = getDatabase(databaseOnlyApp);
 export const firebaseStorage = firebaseApp ? getStorage(firebaseApp) : null;
 
 if (firebaseApp && typeof window !== "undefined" && firebaseConfig.measurementId) {

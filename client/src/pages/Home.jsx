@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  confirmPasswordReset,
   EmailAuthProvider,
   reauthenticateWithCredential,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signOut,
   updatePassword,
+  verifyPasswordResetCode,
 } from "firebase/auth";
 import {
   Activity,
@@ -283,7 +286,7 @@ const buildRecentReadings = (liveSensors = {}) => {
 const pageMeta = {
   dashboard: ["Dashboard Overview", "Real-time overview of slope conditions and recent activities."],
   sensors: ["Sensor Monitoring", "Real-time monitoring of environmental conditions from slope monitoring sensors."],
-  alerts: ["Alerts", "View and manage all system alerts and notifications."],
+  alerts: ["Alerts", "View important changes in monitored slope conditions."],
   incidents: ["Incident Reports", "View and manage all incident reports submitted by residents."],
   announcements: ["Safety Announcements", "Create, manage, and publish safety announcements to keep the community informed."],
   profile: ["Profile", "Manage your BDRRMC account and dashboard preferences."],
@@ -1333,7 +1336,244 @@ function buildLiveAlertsFromSensors(liveSensors = {}) {
   return alerts;
 }
 
-function AlertsPage({ openSettings, setOpenSettings, markAllTrigger, liveSensors = {} }) {
+function SensorSettingsModal({ open, onClose }) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm animate-in fade-in">
+      <div className="w-full max-w-md rounded-2xl border border-[#dfe7e1] bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="sensor-settings-title">
+        <div className="flex items-center justify-between border-b border-[#edf0ed] pb-3.5">
+          <div className="flex items-center gap-2.5">
+            <Settings size={20} className="text-[#006b37]" />
+            <h3 id="sensor-settings-title" className="text-base font-bold text-[#111827]">Sensor Settings</h3>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-[#64748b] hover:bg-slate-100" aria-label="Close sensor settings">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-4 text-xs">
+          <div>
+            <label className="block font-bold text-[#1f2937]">Soil Moisture Warning Threshold (%)</label>
+            <p className="mb-1.5 text-[11px] text-[#64748b]">Sets the moisture level that requires administrator attention.</p>
+            <input type="number" min="0" max="100" defaultValue={70} className="w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]" />
+          </div>
+
+          <div>
+            <label className="block font-bold text-[#1f2937]">Rainfall Trigger Threshold (ADC)</label>
+            <p className="mb-1.5 text-[11px] text-[#64748b]">Uses the calibrated rain sensor range from 0 to 1023 ADC.</p>
+            <input type="number" min="0" max="1023" defaultValue={601} className="w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]" />
+          </div>
+
+          <div>
+            <label className="block font-bold text-[#1f2937]">Tilt and Vibration Sensitivity</label>
+            <select defaultValue="medium" className="mt-1.5 w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]">
+              <option value="high">High sensitivity (instant trigger)</option>
+              <option value="medium">Medium sensitivity (recommended)</option>
+              <option value="low">Low sensitivity (filtered)</option>
+            </select>
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-[#edf0ed] pt-4">
+            <button onClick={onClose} className="rounded-lg border border-[#dfe7e1] px-4 py-2 text-xs font-bold text-[#64748b] hover:bg-slate-50">Cancel</button>
+            <button onClick={() => { onClose(); toast.success("Sensor settings saved successfully."); }} className="rounded-lg bg-[#006b37] px-4 py-2 text-xs font-bold text-white hover:bg-[#00522a]">Save Changes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const buildReadableLiveAlerts = (liveSensors = {}, location = "Monitoring location unavailable") => {
+  const soil = liveSensors.soil ?? {};
+  const rain = liveSensors.rain ?? {};
+  const tilt = liveSensors.tilt ?? {};
+  const vibration = liveSensors.vibration ?? {};
+  const soilMoisture = Number(soil.moisturePercent ?? 0);
+  const rainValue = Number(rain.rawValue ?? 0);
+  const tiltDetected = getDetectionState(tilt, ["tiltDetected", "detected", "value", "level", "status"]);
+  const vibrationDetected = getDetectionState(vibration, ["vibrationDetected", "detected", "value", "level", "status"]);
+  const movementDetected = tiltDetected || vibrationDetected;
+  const detectedAt = Math.max(Number(soil.receivedAt ?? 0), Number(rain.receivedAt ?? 0), Number(tilt.receivedAt ?? 0), Number(vibration.receivedAt ?? 0));
+  const alerts = [];
+
+  if (rainValue >= 801 && soilMoisture >= 80 && movementDetected) {
+    alerts.push({
+      id: "danger-combined",
+      title: "Danger — Multiple Warning Signs",
+      description: "Heavy rainfall, high soil moisture, and possible ground movement were detected. Immediate BDRRMC review is needed.",
+      location,
+      detectedAt,
+      condition: "Danger",
+      status: "attention",
+      recommended: "Review the monitored area and coordinate the appropriate BDRRMC response.",
+      danger: true,
+    });
+    return alerts;
+  }
+
+  if (rainValue >= 601) {
+    const heavy = rainValue >= 801;
+    alerts.push({
+      id: "rainfall",
+      title: heavy ? "Heavy Rainfall Detected" : "Moderate Rainfall Detected",
+      description: heavy
+        ? "Heavy rainfall is affecting the monitored area. Stay alert for further changes."
+        : "Rainfall is increasing in the monitored area. Continue monitoring conditions.",
+      location,
+      detectedAt: Number(rain.receivedAt ?? detectedAt),
+      condition: heavy ? "Heavy rainfall" : "Moderate rainfall",
+      status: "attention",
+      recommended: "Continue observing rainfall and related slope conditions.",
+    });
+  }
+
+  if (soilMoisture >= 60) {
+    const high = soilMoisture >= 80;
+    alerts.push({
+      id: "soil-moisture",
+      title: high ? "High Soil Moisture Detected" : "Elevated Soil Moisture",
+      description: high
+        ? "The monitored soil has become highly saturated. Watch for additional warning signs."
+        : "Soil moisture is increasing in the monitored area.",
+      location,
+      detectedAt: Number(soil.receivedAt ?? detectedAt),
+      condition: high ? "High soil moisture" : "Elevated soil moisture",
+      status: "attention",
+      recommended: "Monitor rainfall and movement sensors for additional changes.",
+    });
+  }
+
+  if (tiltDetected) {
+    alerts.push({
+      id: "slope-movement",
+      title: "Possible Slope Movement",
+      description: "A change in slope position was detected. Review the monitored area's condition.",
+      location,
+      detectedAt: Number(tilt.receivedAt ?? detectedAt),
+      condition: "Movement detected",
+      status: "attention",
+      recommended: "Inspect the monitored condition and compare it with rainfall and soil moisture readings.",
+    });
+  }
+
+  if (vibrationDetected) {
+    alerts.push({
+      id: "ground-vibration",
+      title: "Ground Vibration Detected",
+      description: "Unusual ground vibration was detected. Continue monitoring for further changes.",
+      location,
+      detectedAt: Number(vibration.receivedAt ?? detectedAt),
+      condition: "Vibration detected",
+      status: "attention",
+      recommended: "Continue monitoring and review the area if vibration persists.",
+    });
+  }
+
+  return alerts.sort((a, b) => b.detectedAt - a.detectedAt);
+};
+
+function SimplifiedAlertsPage({ liveSensors = {}, profile = {}, setPage }) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [selectedAlert, setSelectedAlert] = useState(null);
+  const barangay = profile.barangay ? (/^barangay\b/i.test(profile.barangay) ? profile.barangay : `Barangay ${profile.barangay}`) : "Monitoring area";
+  const location = [barangay, profile.city].filter(Boolean).join(", ");
+  const alerts = buildReadableLiveAlerts(liveSensors, location);
+  const activeCount = alerts.filter((alert) => alert.status === "attention").length;
+  const resolvedCount = alerts.filter((alert) => alert.status === "resolved").length;
+  const visibleAlerts = alerts.filter((alert) => {
+    const matchesFilter = filter === "all" || alert.status === filter;
+    const query = searchTerm.trim().toLowerCase();
+    return matchesFilter && (!query || [alert.title, alert.description, alert.location, alert.condition].some((value) => value.toLowerCase().includes(query)));
+  });
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="dashboard-card p-5">
+          <div className="flex items-center gap-2 text-xs font-bold text-[#554d35]"><AlertTriangle size={16} /> Needs Attention</div>
+          <div className="mt-3 text-2xl font-extrabold text-[#27352f]">{activeCount}</div>
+          <div className="mt-1 text-xs text-[#64748b]">Active warnings requiring review</div>
+        </div>
+        <div className="dashboard-card p-5">
+          <div className="flex items-center gap-2 text-xs font-bold text-[#276749]"><CheckCircle2 size={16} /> Resolved</div>
+          <div className="mt-3 text-2xl font-extrabold text-[#27352f]">{resolvedCount}</div>
+          <div className="mt-1 text-xs text-[#64748b]">Verified resolved alerts</div>
+        </div>
+      </div>
+
+      <section className="dashboard-card overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-[#e7ece8] p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-[#27352f]">Recent Alerts</h2>
+            <p className="mt-0.5 text-xs text-[#64748b]">Newest conditions appear first.</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex items-center gap-2 rounded-lg border border-[#dfe7e1] bg-white px-3 py-2 text-[#64748b]">
+              <Search size={15} />
+              <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search alerts" className="w-full bg-transparent text-xs text-[#27352f] outline-none sm:w-48" />
+            </div>
+            <select value={filter} onChange={(event) => setFilter(event.target.value)} className="rounded-lg border border-[#dfe7e1] bg-white px-3 py-2 text-xs font-semibold text-[#475569] outline-none focus:border-[#087442]">
+              <option value="all">All</option>
+              <option value="attention">Needs Attention</option>
+              <option value="resolved">Resolved</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="divide-y divide-[#edf0ed]">
+          {visibleAlerts.length === 0 ? (
+            <div className="px-5 py-12 text-center">
+              <CheckCircle2 size={28} className="mx-auto text-[#2f6f4e]" />
+              <div className="mt-3 text-sm font-bold text-[#27352f]">No alerts match this view</div>
+              <p className="mt-1 text-xs text-[#64748b]">Current Firebase readings do not show a condition requiring attention.</p>
+            </div>
+          ) : visibleAlerts.slice(0, 10).map((alert) => (
+            <article key={alert.id} className="p-4 sm:p-5">
+              <div className="flex items-start gap-3">
+                <span className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full ${alert.danger ? "bg-[#fee2e2] text-[#b91c1c]" : "bg-[#f8f5e9] text-[#6b5f38]"}`}>
+                  <AlertTriangle size={17} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <h3 className="text-sm font-bold text-[#27352f]">{alert.title}</h3>
+                    <time className="shrink-0 text-[11px] text-[#718078]" dateTime={new Date(alert.detectedAt).toISOString()}>{new Date(alert.detectedAt).toLocaleString("en-PH", { timeZone: "Asia/Manila", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-[#64748b]">{alert.description}</p>
+                  <div className="mt-3 flex flex-col gap-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+                    <span className="inline-flex items-center gap-1.5 text-[#526057]"><MapPin size={13} /> {alert.location}</span>
+                    <button onClick={() => setSelectedAlert(alert)} className="inline-flex items-center gap-1 font-bold text-[#087442] hover:underline">View Details <ChevronRight size={13} /></button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {selectedAlert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-[#dfe7e1] bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="alert-detail-title">
+            <div className="flex items-start justify-between gap-4 border-b border-[#edf0ed] pb-4">
+              <div><h3 id="alert-detail-title" className="text-lg font-bold text-[#27352f]">{selectedAlert.title}</h3><p className="mt-1 text-xs leading-5 text-[#64748b]">{selectedAlert.description}</p></div>
+              <button onClick={() => setSelectedAlert(null)} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[#64748b] hover:bg-slate-100" aria-label="Close alert details"><X size={18} /></button>
+            </div>
+            <dl className="mt-4 grid gap-4 text-xs sm:grid-cols-2">
+              <div><dt className="font-medium text-[#64748b]">Monitoring location</dt><dd className="mt-1 font-bold text-[#27352f]">{selectedAlert.location}</dd></div>
+              <div><dt className="font-medium text-[#64748b]">Date and time detected</dt><dd className="mt-1 font-bold text-[#27352f]">{new Date(selectedAlert.detectedAt).toLocaleString("en-PH", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" })}</dd></div>
+              <div><dt className="font-medium text-[#64748b]">Current condition</dt><dd className={`mt-1 font-bold ${selectedAlert.danger ? "text-[#b91c1c]" : "text-[#554d35]"}`}>{selectedAlert.condition}</dd></div>
+              <div><dt className="font-medium text-[#64748b]">Recommended next step</dt><dd className="mt-1 font-bold leading-5 text-[#27352f]">{selectedAlert.recommended}</dd></div>
+            </dl>
+            <div className="mt-5 flex justify-end border-t border-[#edf0ed] pt-4"><button onClick={() => { setSelectedAlert(null); setPage("sensors"); }} className="rounded-lg bg-[#087442] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#065e35]">Open Sensor Monitoring</button></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AlertsPage({ markAllTrigger, liveSensors = {} }) {
   const [alerts, setAlerts] = useState(() => buildLiveAlertsFromSensors(liveSensors));
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -1838,74 +2078,6 @@ function AlertsPage({ openSettings, setOpenSettings, markAllTrigger, liveSensors
         </div>
       )}
 
-      {/* Alert Settings Modal */}
-      {openSettings && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="w-full max-w-md rounded-2xl border border-[#dfe7e1] bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#edf0ed] pb-3.5">
-              <div className="flex items-center gap-2.5">
-                <Settings size={20} className="text-[#006b37]" />
-                <h3 className="text-base font-bold text-[#111827]">Alert Threshold Settings</h3>
-              </div>
-              <button
-                onClick={() => setOpenSettings(false)}
-                className="grid h-8 w-8 place-items-center rounded-lg text-[#64748b] hover:bg-slate-100 transition"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-4 text-xs">
-              <div>
-                <label className="block font-bold text-[#1f2937]">Soil Moisture Critical Limit (%)</label>
-                <p className="text-[11px] text-[#64748b] mb-1.5">Triggers Critical alert when moisture exceeds this value.</p>
-                <input
-                  type="number"
-                  defaultValue={70}
-                  className="w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-[#1f2937]">Rain Sensor ADC Trigger Threshold</label>
-                <p className="text-[11px] text-[#64748b] mb-1.5">Triggers Heavy Rainfall alert when reading exceeds threshold.</p>
-                <input
-                  type="number"
-                  defaultValue={2500}
-                  className="w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-[#1f2937]">Tilt & Vibration Sensitivity</label>
-                <select className="mt-1.5 w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]">
-                  <option>High Sensitivity (Instant Trigger)</option>
-                  <option defaultValue>Medium Sensitivity (Recommended)</option>
-                  <option>Low Sensitivity (Filtered)</option>
-                </select>
-              </div>
-
-              <div className="border-t border-[#edf0ed] pt-4 flex justify-end gap-2">
-                <button
-                  onClick={() => setOpenSettings(false)}
-                  className="rounded-lg border border-[#dfe7e1] px-4 py-2 text-xs font-bold text-[#64748b] hover:bg-slate-50 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    setOpenSettings(false);
-                    toast.success("Alert settings saved successfully.");
-                  }}
-                  className="rounded-lg bg-[#006b37] px-4 py-2 text-xs font-bold text-white hover:bg-[#00522a] transition"
-                >
-                  Save Changes
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -3751,6 +3923,96 @@ function Sidebar({ page, setPage, open, setOpen, onLogout }) {
   );
 }
 
+function ResetPasswordAction({ onBackToLogin }) {
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get("mode");
+  const oobCode = params.get("oobCode") || "";
+  const [email, setEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [status, setStatus] = useState("checking");
+  const [message, setMessage] = useState("Validating your password reset link...");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!firebaseAuth || mode !== "resetPassword" || !oobCode) {
+      setStatus("invalid");
+      setMessage("This password reset link is incomplete or invalid.");
+      return undefined;
+    }
+
+    verifyPasswordResetCode(firebaseAuth, oobCode)
+      .then((accountEmail) => {
+        if (!active) return;
+        setEmail(accountEmail);
+        setStatus("ready");
+        setMessage("");
+      })
+      .catch((error) => {
+        if (!active) return;
+        setStatus("invalid");
+        setMessage(error?.code === "auth/expired-action-code" ? "This password reset link has expired. Request a new link from the login page." : "This password reset link is invalid or has already been used.");
+      });
+
+    return () => { active = false; };
+  }, [mode, oobCode]);
+
+  const handleReset = async (event) => {
+    event.preventDefault();
+    if (newPassword.length < 6) {
+      setMessage("Use a password with at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setMessage("The new passwords do not match.");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      setMessage("");
+      await confirmPasswordReset(firebaseAuth, oobCode, newPassword);
+      setStatus("success");
+      setMessage("Your password has been changed successfully. You can now sign in with the new password.");
+      localStorage.removeItem("slopesense-remember-password");
+    } catch (error) {
+      setMessage(error?.code === "auth/expired-action-code" ? "This password reset link has expired. Request a new link." : error?.message || "Unable to change the password.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <main className="login-reference-scene grid min-h-screen place-items-center bg-white px-5 py-10">
+      <section className="w-full max-w-md rounded-2xl border border-[#dfe7e1] bg-white/95 p-6 shadow-[0_20px_50px_rgba(0,107,55,0.08)] sm:p-8">
+        <div className="text-center"><Logo small /><h1 className="mt-6 text-2xl font-extrabold tracking-tight text-[#006b37]">Change Password</h1><p className="mt-2 text-sm text-[#64748b]">Create a new password for your SlopeSense account.</p></div>
+
+        {status === "checking" && <div className="mt-7 rounded-xl border border-[#dfe7e1] bg-[#f6faf7] p-4 text-center text-sm text-[#526057]">{message}</div>}
+
+        {status === "invalid" && (
+          <div className="mt-7"><div className="rounded-xl border border-[#fecaca] bg-[#fef2f2] p-4 text-sm leading-6 text-[#991b1b]">{message}</div><button onClick={onBackToLogin} className="mt-5 w-full rounded-xl bg-[#006b37] px-4 py-3 text-sm font-bold text-white hover:bg-[#00522a]">Back to Login</button></div>
+        )}
+
+        {status === "ready" && (
+          <form onSubmit={handleReset} className="mt-7 space-y-4">
+            <div className="rounded-lg bg-[#f6faf7] px-3 py-2.5 text-xs text-[#526057]">Resetting password for <span className="font-bold text-[#27352f]">{email}</span></div>
+            <label className="block text-sm font-bold text-[#27352f]">New password<input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="mt-2 w-full rounded-xl border border-[#cbd5e1] px-4 py-3 font-normal outline-none focus:border-[#006b37] focus:ring-2 focus:ring-[#006b37]/15" required /></label>
+            <label className="block text-sm font-bold text-[#27352f]">Confirm new password<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-2 w-full rounded-xl border border-[#cbd5e1] px-4 py-3 font-normal outline-none focus:border-[#006b37] focus:ring-2 focus:ring-[#006b37]/15" required /></label>
+            {message && <div className="rounded-lg border border-[#fed7aa] bg-[#fff7ed] px-3 py-2 text-xs text-[#9a3412]">{message}</div>}
+            <button type="submit" disabled={submitting} className="w-full rounded-xl bg-[#006b37] px-4 py-3 text-sm font-bold text-white hover:bg-[#00522a] disabled:cursor-not-allowed disabled:opacity-60">{submitting ? "Changing Password..." : "Change Password"}</button>
+          </form>
+        )}
+
+        {status === "success" && (
+          <div className="mt-7"><div className="rounded-xl border border-[#bbf7d0] bg-[#ecfdf5] p-4 text-sm leading-6 text-[#166534]">{message}</div><button onClick={onBackToLogin} className="mt-5 w-full rounded-xl bg-[#006b37] px-4 py-3 text-sm font-bold text-white hover:bg-[#00522a]">Continue to Login</button></div>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function ForgotPassword({ onBack }) {
   const [email, setEmail] = useState(() => localStorage.getItem("slopesense-remember-email") || "");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -4062,6 +4324,9 @@ export default function Home() {
   const LAST_SENSOR_ALERT_KEY = "slopesense-last-sensor-alert";
 
   const [page, setPage] = useState(() => {
+    const actionParams = new URLSearchParams(window.location.search);
+    if (window.location.pathname === "/auth/action" || actionParams.get("mode") === "resetPassword") return "reset-password";
+    if (localStorage.getItem("slopesense-explicit-logout") === "true") return "login";
     const requestedPage = window.location.hash.replace("#", "");
     return requestedPage && pageMeta[requestedPage] ? requestedPage : "dashboard";
   });
@@ -4086,6 +4351,7 @@ export default function Home() {
       return defaultPreferences;
     }
   });
+  const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
   const [liveSensors, setLiveSensors] = useState({});
   const [liveNotificationCount, setLiveNotificationCount] = useState(0);
   const [sensorHistory, setSensorHistory] = useState({ soil: [], rain: [], tilt: [], vibration: [] });
@@ -4158,6 +4424,20 @@ export default function Home() {
     );
   };
 
+  const handleLogout = async () => {
+    try {
+      if (firebaseAuth) await signOut(firebaseAuth);
+      localStorage.setItem("slopesense-explicit-logout", "true");
+      setNotificationPanelOpen(false);
+      setLogoutConfirmOpen(false);
+      setPage("login");
+    } catch (error) {
+      toast.error("Unable to log out", {
+        description: error?.message || "The Firebase session could not be closed. Please try again.",
+      });
+    }
+  };
+
   useEffect(() => {
     localStorage.setItem("slopesense-profile", JSON.stringify(profile));
   }, [profile]);
@@ -4169,6 +4449,11 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem("slopesense-app-notifications", JSON.stringify(notifications));
   }, [notifications]);
+
+  useEffect(() => {
+    const clockInterval = window.setInterval(() => setCurrentDateTime(new Date()), 1000);
+    return () => window.clearInterval(clockInterval);
+  }, []);
 
   useEffect(() => {
     if (!firebaseDatabase) return;
@@ -4352,12 +4637,30 @@ export default function Home() {
     return () => unsubscribe();
   }, [addNotification, userMap]);
 
-  if (page === "login") return <Login onEnter={() => setPage("dashboard")} onForgotPassword={() => setPage("forgot-password")} />;
+  if (page === "reset-password") return <ResetPasswordAction onBackToLogin={() => { window.history.replaceState({}, "", "/"); setPage("login"); }} />;
+  if (page === "login") return <Login onEnter={() => { localStorage.removeItem("slopesense-explicit-logout"); setPage("dashboard"); }} onForgotPassword={() => setPage("forgot-password")} />;
   if (page === "forgot-password") return <ForgotPassword onBack={() => setPage("login")} />;
   const [title, subtitle] = pageMeta[page];
   const sensorData = buildSensorData(liveSensors);
   const monitoringSensorData = buildMonitoringSensorData(liveSensors);
   const shouldShowAlertBadge = unreadNotifications > 0;
+  const barangayLabel = profile.barangay
+    ? /^barangay\b/i.test(profile.barangay.trim())
+      ? profile.barangay.trim()
+      : `Barangay ${profile.barangay.trim()}`
+    : "Barangay location unavailable";
+  const profileLocation = [barangayLabel, profile.city?.trim()].filter(Boolean).join(", ");
+  const currentDateLabel = currentDateTime.toLocaleDateString("en-PH", {
+    timeZone: "Asia/Manila",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const currentTimeLabel = currentDateTime.toLocaleTimeString("en-PH", {
+    timeZone: "Asia/Manila",
+    hour: "numeric",
+    minute: "2-digit",
+  });
   return (
     <div className="min-h-screen bg-[#f7f9f7] text-[#27352f]">
       <div className="flex min-h-screen">
@@ -4382,7 +4685,7 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <MapPin size={24} className="text-[#087442] shrink-0" strokeWidth={2.2} />
                 <div className="leading-tight">
-                  <div className="text-sm sm:text-base font-bold text-[#087442]">Barangay Malinao, Ormoc City</div>
+                  <div className="text-sm sm:text-base font-bold text-[#087442]">{profileLocation}</div>
                   <div className="text-xs text-[#64748b]">Slope Monitoring Station</div>
                 </div>
               </div>
@@ -4390,10 +4693,12 @@ export default function Home() {
             <div className="flex items-center gap-4 sm:gap-6">
               <div className="hidden lg:flex items-center gap-3">
                 <div className="flex items-center gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-1.5 text-xs font-semibold text-[#334155] shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-                  <CalendarDays size={15} className="text-[#475569]" /> May 27, 2025
+                  <CalendarDays size={15} className="text-[#475569]" />
+                  <time dateTime={currentDateTime.toISOString()}>{currentDateLabel}</time>
                 </div>
                 <div className="flex items-center gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-1.5 text-xs font-semibold text-[#334155] shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-                  <Clock size={15} className="text-[#475569]" /> 10:42 AM
+                  <Clock size={15} className="text-[#475569]" />
+                  <time dateTime={currentDateTime.toISOString()}>{currentTimeLabel}</time>
                 </div>
               </div>
               <div className="relative">
@@ -4508,23 +4813,14 @@ export default function Home() {
                     <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#111827]">{title}</h1>
                     <p className="mt-1 text-xs text-[#64748b]">{subtitle}</p>
                   </div>
-                  {page === "alerts" && (
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => setAlertSettingsOpen(true)}
-                        className="inline-flex items-center gap-2 rounded-lg border border-[#dfe7e1] bg-white px-3.5 py-2 text-xs font-bold text-[#1f2937] shadow-sm hover:bg-slate-50 transition"
-                      >
-                        <Settings size={15} className="text-[#475569]" />
-                        Alert Settings
-                      </button>
-                      <button
-                        onClick={() => setMarkAllAlertsTrigger((c) => c + 1)}
-                        className="inline-flex items-center gap-2 rounded-lg bg-[#006b37] px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-[#00522a] transition"
-                      >
-                        <Mail size={15} className="text-white" />
-                        Mark All as Read
-                      </button>
-                    </div>
+                  {page === "sensors" && (
+                    <button
+                      onClick={() => setAlertSettingsOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-[#dfe7e1] bg-white px-3.5 py-2 text-xs font-bold text-[#1f2937] shadow-sm transition hover:border-[#b9d8c5] hover:bg-[#f3f8f4]"
+                    >
+                      <Settings size={15} className="text-[#087442]" />
+                      Sensor Settings
+                    </button>
                   )}
                   {page === "announcements" && (
                     <button
@@ -4552,11 +4848,10 @@ export default function Home() {
                   />
                 )}
                 {page === "alerts" && (
-                  <AlertsPage
-                    openSettings={alertSettingsOpen}
-                    setOpenSettings={setAlertSettingsOpen}
-                    markAllTrigger={markAllAlertsTrigger}
+                  <SimplifiedAlertsPage
                     liveSensors={liveSensors}
+                    profile={profile}
+                    setPage={setPage}
                   />
                 )}
                 {page === "incidents" && (
@@ -4577,6 +4872,7 @@ export default function Home() {
           </main>
         </div>
       </div>
+      <SensorSettingsModal open={alertSettingsOpen} onClose={() => setAlertSettingsOpen(false)} />
       {logoutConfirmOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#143a28]/35 px-4" role="presentation">
           <div
@@ -4604,16 +4900,7 @@ export default function Home() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  const rememberEnabled = localStorage.getItem("slopesense-remember") === "true";
-                  if (!rememberEnabled) {
-                    localStorage.removeItem("slopesense-remembered-email");
-                    localStorage.removeItem("slopesense-remembered-password");
-                  }
-
-                  setLogoutConfirmOpen(false);
-                  setPage("login");
-                }}
+                onClick={handleLogout}
                 className="rounded-lg bg-[#dc2626] px-4 py-2 text-xs font-bold text-white hover:bg-[#b91c1c] transition"
               >
                 Log out
