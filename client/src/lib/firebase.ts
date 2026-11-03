@@ -6,16 +6,27 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const readEnv = (value: string | undefined) => value?.trim().replace(/^(['"])(.*)\1$/, "$2") || undefined;
-const publicDatabaseUrl = "https://slopesense-ec686-default-rtdb.asia-southeast1.firebasedatabase.app";
+// Firebase web configuration is public by design. Environment values remain the
+// preferred override, while these project defaults keep local and Vercel builds
+// functional when an environment file has not been provisioned yet.
+const publicFirebaseConfig = {
+  apiKey: "AIzaSyDIpXGSAnpbEVy4BWivh9R18zdSERZ9Yjc",
+  authDomain: "slopesense-ec686.firebaseapp.com",
+  projectId: "slopesense-ec686",
+  databaseURL: "https://slopesense-ec686-default-rtdb.asia-southeast1.firebasedatabase.app",
+  storageBucket: "slopesense-ec686.firebasestorage.app",
+  messagingSenderId: "444869040808",
+  appId: "1:444869040808:web:6dd002efca264d25b4009d",
+};
 
 const firebaseConfig = {
-  apiKey: readEnv(import.meta.env.VITE_FIREBASE_API_KEY),
-  authDomain: readEnv(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN),
-  projectId: readEnv(import.meta.env.VITE_FIREBASE_PROJECT_ID),
-  databaseURL: readEnv(import.meta.env.VITE_FIREBASE_DATABASE_URL) || publicDatabaseUrl,
-  storageBucket: readEnv(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET),
-  messagingSenderId: readEnv(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID),
-  appId: readEnv(import.meta.env.VITE_FIREBASE_APP_ID),
+  apiKey: readEnv(import.meta.env.VITE_FIREBASE_API_KEY) || publicFirebaseConfig.apiKey,
+  authDomain: readEnv(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN) || publicFirebaseConfig.authDomain,
+  projectId: readEnv(import.meta.env.VITE_FIREBASE_PROJECT_ID) || publicFirebaseConfig.projectId,
+  databaseURL: readEnv(import.meta.env.VITE_FIREBASE_DATABASE_URL) || publicFirebaseConfig.databaseURL,
+  storageBucket: readEnv(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET) || publicFirebaseConfig.storageBucket,
+  messagingSenderId: readEnv(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID) || publicFirebaseConfig.messagingSenderId,
+  appId: readEnv(import.meta.env.VITE_FIREBASE_APP_ID) || publicFirebaseConfig.appId,
   measurementId: readEnv(import.meta.env.VITE_FIREBASE_MEASUREMENT_ID),
 };
 
@@ -49,7 +60,7 @@ const databaseOnlyApp = firebaseApp
   : getApps().find((app) => app.name === "slopesense-public-database") ??
     initializeApp(
       {
-        projectId: firebaseConfig.projectId || "slopesense-ec686",
+        projectId: firebaseConfig.projectId,
         databaseURL: firebaseConfig.databaseURL,
       },
       "slopesense-public-database"

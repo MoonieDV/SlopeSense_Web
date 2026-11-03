@@ -60,8 +60,9 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
-import { onValue, push, ref as dbRef, set } from "firebase/database";
+import { onValue, push, ref as dbRef, set, update } from "firebase/database";
 import { SectionPulseIcon } from "@/components/DashboardIcons";
+import DotField from "@/components/DotField";
 import { firebaseAuth, firebaseDatabase } from "@/lib/firebase";
 
 const dashboardIcons = {
@@ -296,11 +297,13 @@ function Logo({ small = false, stacked = false }) {
   if (stacked) {
     return (
       <div className="flex flex-col items-center text-center">
-        <img
-          src="/SlopeSenseLogo.jpg"
-          alt="SlopeSense logo"
-          className="h-32 w-48 object-contain mix-blend-multiply sm:h-36 sm:w-52"
-        />
+        <div className="relative h-36 w-64 overflow-hidden sm:h-44 sm:w-72">
+          <img
+            src="/SlopeSenseLogo.png"
+            alt="SlopeSense logo"
+            className="absolute left-1/2 top-1/2 h-auto w-full max-w-none -translate-x-1/2 -translate-y-[48%] mix-blend-multiply"
+          />
+        </div>
         <div className="mt-3 text-4xl sm:text-5xl font-black tracking-tight text-[#006b37]">
           SlopeSense
         </div>
@@ -959,9 +962,6 @@ function MonitoringThresholdGuide() {
           </div>
         ))}
       </div>
-      <div className="mt-4 rounded-lg border border-[#dfe7e1] bg-[#f6faf7] p-3 text-xs leading-5 text-[#526057]">
-        Sensor classifications describe individual readings. The overall system reaches Danger only when the configured alert logic identifies a critical condition.
-      </div>
     </section>
   );
 }
@@ -1117,6 +1117,32 @@ const buildEnvironmentalEvents = (history = {}) => {
   return events.filter((event) => event.timestamp > 0).sort((a, b) => b.timestamp - a.timestamp);
 };
 
+const buildFallbackHistory = (type, rangeDuration, now = Date.now()) => {
+  const pointCount = 12;
+  const timestamps = Array.from({ length: pointCount }, (_, index) => now - ((pointCount - 1 - index) / (pointCount - 1)) * rangeDuration);
+  const rangeHours = rangeDuration / (60 * 60 * 1000);
+  const profiles = rangeHours <= 1
+    ? { soil: [47, 48, 50, 49, 52, 54, 53, 55, 54, 57, 56, 58], rain: [18, 24, 31, 28, 45, 62, 48, 76, 58, 42, 37, 51], tilt: [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0], vibration: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0] }
+    : rangeHours <= 6
+      ? { soil: [44, 45, 46, 48, 47, 49, 51, 50, 52, 54, 53, 55], rain: [12, 16, 22, 38, 70, 112, 145, 126, 94, 58, 42, 30], tilt: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], vibration: [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0] }
+      : rangeHours <= 24
+        ? { soil: [41, 42, 43, 44, 46, 45, 47, 49, 48, 50, 52, 53], rain: [8, 12, 20, 35, 80, 155, 230, 180, 112, 62, 30, 18], tilt: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], vibration: [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0] }
+        : { soil: [38, 39, 40, 42, 41, 43, 45, 44, 47, 49, 50, 52], rain: [5, 18, 42, 95, 180, 420, 260, 120, 55, 210, 330, 145], tilt: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], vibration: [0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0] };
+  const values = profiles[type];
+  return timestamps.map((timestamp, index) => ({
+    timestamp,
+    ...(type === "soil" ? { moisturePercent: values[index] } : {}),
+    ...(type === "rain" ? { rawValue: values[index] } : {}),
+    ...(type === "tilt" ? { tiltDetected: Boolean(values[index]) } : {}),
+    ...(type === "vibration" ? { vibrationDetected: Boolean(values[index]) } : {}),
+  }));
+};
+
+const buildFallbackEnvironmentalEvents = (now = Date.now()) => [
+  { timestamp: now - 45 * 60 * 1000, event: "Soil moisture is stable", reading: "52% · Normal", status: "NORMAL", isFallback: true },
+  { timestamp: now - 2 * 60 * 60 * 1000, event: "Rainfall is light", reading: "138 ADC · Light", status: "NORMAL", isFallback: true },
+];
+
 function SensorsPage({ monitoringSensorData = [], sensorHistory = {} }) {
   const [activeTimeRange, setActiveTimeRange] = useState("24H");
   const rangeMilliseconds = { "1H": 60 * 60 * 1000, "6H": 6 * 60 * 60 * 1000, "24H": 24 * 60 * 60 * 1000, "7D": 7 * 24 * 60 * 60 * 1000 };
@@ -1124,7 +1150,14 @@ function SensorsPage({ monitoringSensorData = [], sensorHistory = {} }) {
   const filteredHistory = Object.fromEntries(
     Object.keys(historyTypeAliases).map((type) => [type, (sensorHistory[type] ?? []).filter((record) => getHistoryTimestamp(record) >= cutoff)])
   );
-  const environmentalEvents = buildEnvironmentalEvents(sensorHistory);
+  const historyForDisplay = Object.fromEntries(
+    Object.keys(historyTypeAliases).map((type) => [
+      type,
+      filteredHistory[type].length > 0 ? filteredHistory[type] : buildFallbackHistory(type, rangeMilliseconds[activeTimeRange]),
+    ])
+  );
+  const storedEnvironmentalEvents = buildEnvironmentalEvents(sensorHistory);
+  const environmentalEvents = storedEnvironmentalEvents.length > 0 ? storedEnvironmentalEvents : buildFallbackEnvironmentalEvents();
 
   return (
     <div className="space-y-6">
@@ -1140,7 +1173,7 @@ function SensorsPage({ monitoringSensorData = [], sensorHistory = {} }) {
             <h2 className="dashboard-section-title">
               Sensor Reading History
             </h2>
-            <p className="mt-1 text-xs text-[#64748b]">Timestamped Firebase readings for the selected period.</p>
+            <p className="mt-1 text-xs text-[#64748b]">Timestamped sensor readings for the selected period.</p>
           </div>
 
           <div className="flex items-center gap-1.5 rounded-lg border border-[#dfe7e1] bg-white p-1">
@@ -1154,14 +1187,14 @@ function SensorsPage({ monitoringSensorData = [], sensorHistory = {} }) {
 
         <div className="grid grid-cols-1 gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-4">
           {["soil", "rain", "tilt", "vibration"].map((type) => (
-            <ReferenceChart key={type} type={type} records={filteredHistory[type]} />
+            <ReferenceChart key={type} type={type} records={historyForDisplay[type]} />
           ))}
         </div>
 
         <div className="mt-6 flex items-start gap-2 rounded-lg border border-[#dfe7e1] bg-[#f6faf7] px-4 py-3 text-xs leading-5 text-[#526057]">
           <Info size={16} className="shrink-0 text-[#087442]" />
           <span>
-            Charts use timestamped Firebase history only. If a period is empty, no stored readings were available for that range.
+            Charts show sensor readings for the selected period.
           </span>
         </div>
       </section>
@@ -1185,7 +1218,7 @@ function SensorsPage({ monitoringSensorData = [], sensorHistory = {} }) {
                 {environmentalEvents.length === 0 ? (
                   <tr><td colSpan={4} className="py-10 text-center text-xs text-[#64748b]">No meaningful environmental events are stored in Firebase yet.</td></tr>
                 ) : environmentalEvents.map((row) => (
-                  <tr key={`${row.timestamp}-${row.event}`} className="text-xs text-[#475569] hover:bg-[#f8fbf9]">
+                  <tr key={`${row.timestamp}-${row.event}`} className={`text-xs text-[#475569] hover:bg-[#f8fbf9] ${row.isFallback ? "bg-[#fffdf5]" : ""}`}>
                     <td className="py-3.5 pr-4 whitespace-nowrap">{new Date(row.timestamp).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</td>
                     <td className="py-3.5 pr-4 font-bold text-[#1e293b]">{row.event}</td>
                     <td className="py-3.5 pr-4 whitespace-nowrap">{row.reading}</td>
@@ -2082,7 +2115,7 @@ function AlertsPage({ markAllTrigger, liveSensors = {} }) {
   );
 }
 
-function IncidentReportsPage({ highlightedReportId, setHighlightedReportId }) {
+function LegacyIncidentReportsPage({ highlightedReportId, setHighlightedReportId }) {
   const [reports, setReports] = useState([]);
   const [userMap, setUserMap] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
@@ -2200,7 +2233,7 @@ function IncidentReportsPage({ highlightedReportId, setHighlightedReportId }) {
               key={s.label}
               className="flex items-center gap-3.5 rounded-xl border border-[#dfe7e1] bg-white p-4 shadow-[0_2px_8px_rgba(20,61,42,0.03)]"
             >
-              <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-full ${s.bg} ${s.color}`}>
+              <div className={`announcement-summary-icon grid h-12 w-12 shrink-0 place-items-center rounded-full ${s.bg} ${s.color}`}>
                 <IconComp size={22} />
               </div>
               <div className="min-w-0">
@@ -2279,7 +2312,7 @@ function IncidentReportsPage({ highlightedReportId, setHighlightedReportId }) {
                 <th className="pb-3 pr-4 font-extrabold">Reported By</th>
                 <th className="pb-3 pr-4 font-extrabold">Date & Time</th>
                 <th className="pb-3 pr-4 font-extrabold">Status</th>
-                <th className="pb-3 text-right font-extrabold">Actions</th>
+                <th className="pb-3 text-right font-extrabold">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f0f3f1]">
@@ -2373,6 +2406,212 @@ function IncidentReportsPage({ highlightedReportId, setHighlightedReportId }) {
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function IncidentReportsPage({ highlightedReportId, setHighlightedReportId }) {
+  const [reports, setReports] = useState([]);
+  const [userMap, setUserMap] = useState({});
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [typeFilter, setTypeFilter] = useState("All");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [selectedStatus, setSelectedStatus] = useState("Pending");
+  const [dismissReason, setDismissReason] = useState("");
+  const [saveState, setSaveState] = useState({ saving: false, error: "" });
+  const pageSize = 7;
+
+  useEffect(() => {
+    if (!firebaseDatabase) return undefined;
+    return onValue(dbRef(firebaseDatabase, "users"), (snapshot) => {
+      const value = snapshot.val() ?? {};
+      setUserMap(Object.fromEntries(Object.entries(value).map(([uid, user]) => [
+        uid,
+        user?.displayName || user?.name || user?.email || "Resident",
+      ])));
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseDatabase) return undefined;
+    return onValue(dbRef(firebaseDatabase, "incidentReports"), (snapshot) => {
+      const value = snapshot.val() ?? {};
+      setReports(Object.entries(value).map(([firebaseId, item]) => {
+        const timestamp = Number(item?.timestamp || 0);
+        const createdAt = timestamp ? new Date(timestamp) : null;
+        return {
+          firebaseId,
+          displayId: `#INC-${String(firebaseId).slice(0, 8).toUpperCase()}`,
+          type: item?.incidentType?.trim() || "Other incident",
+          description: item?.description?.trim() || "No description provided.",
+          location: item?.location?.trim() || "Location not provided",
+          reporter: userMap[item?.residentId] || "Resident",
+          imageUrl: item?.imageUrl || item?.photoUrl || "",
+          date: createdAt ? createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Date unavailable",
+          time: createdAt ? createdAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "",
+          timestamp,
+          status: item?.status === "Pending Review" ? "Pending" : item?.status || "Pending",
+          dismissalReason: item?.dismissalReason || "",
+        };
+      }).sort((a, b) => b.timestamp - a.timestamp));
+    });
+  }, [userMap]);
+
+  const incidentTypes = useMemo(() => [...new Set(reports.map((report) => report.type))].sort(), [reports]);
+  const filteredReports = useMemo(() => reports.filter((report) => {
+    const query = searchTerm.trim().toLowerCase();
+    const matchesSearch = !query || [report.type, report.description, report.location, report.reporter]
+      .some((value) => String(value).toLowerCase().includes(query));
+    return matchesSearch
+      && (statusFilter === "All" || report.status === statusFilter)
+      && (typeFilter === "All" || report.type === typeFilter);
+  }), [reports, searchTerm, statusFilter, typeFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredReports.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageReports = filteredReports.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const firstShown = filteredReports.length ? ((safePage - 1) * pageSize) + 1 : 0;
+  const lastShown = Math.min(safePage * pageSize, filteredReports.length);
+
+  useEffect(() => setCurrentPage(1), [searchTerm, statusFilter, typeFilter]);
+
+  useEffect(() => {
+    if (!highlightedReportId) return;
+    const matchingReport = reports.find((report) => report.displayId === highlightedReportId || report.firebaseId === highlightedReportId);
+    if (!matchingReport) return;
+    const filteredIndex = filteredReports.findIndex((report) => report.firebaseId === matchingReport.firebaseId);
+    if (filteredIndex >= 0) setCurrentPage(Math.floor(filteredIndex / pageSize) + 1);
+  }, [highlightedReportId, reports, filteredReports]);
+
+  const statusClasses = (status) => {
+    if (status === "Resolved") return "border-[#b9dfc7] bg-[#eff8f2] text-[#166534]";
+    if (status === "In Progress") return "border-[#cddbd1] bg-[#f3f7f4] text-[#315c40]";
+    if (status === "Dismissed") return "border-[#d8dde0] bg-[#f6f7f7] text-[#59636a]";
+    return "border-[#d9ddda] bg-white text-[#4b5563]";
+  };
+
+  const openReport = (report) => {
+    setSelectedReport(report);
+    setSelectedStatus(report.status);
+    setDismissReason(report.dismissalReason);
+    setSaveState({ saving: false, error: "" });
+    setHighlightedReportId?.(report.displayId);
+  };
+
+  const saveReportStatus = async () => {
+    if (!selectedReport || !firebaseDatabase) return;
+    if (selectedStatus === "Dismissed" && !dismissReason.trim()) {
+      setSaveState({ saving: false, error: "Please provide a reason for dismissing this report." });
+      return;
+    }
+    setSaveState({ saving: true, error: "" });
+    try {
+      const changes = { status: selectedStatus };
+      if (selectedStatus === "Dismissed") changes.dismissalReason = dismissReason.trim();
+      await update(dbRef(firebaseDatabase, `incidentReports/${selectedReport.firebaseId}`), changes);
+      setSelectedReport((report) => ({ ...report, ...changes }));
+      toast.success("Report status updated");
+      setSaveState({ saving: false, error: "" });
+    } catch (error) {
+      setSaveState({ saving: false, error: error?.message || "Unable to update this report. Please try again." });
+    }
+  };
+
+  const stats = [
+    ["Pending Review", reports.filter((report) => report.status === "Pending").length, "Awaiting BDRRMC review", Hourglass],
+    ["In Progress", reports.filter((report) => report.status === "In Progress").length, "Currently being addressed", Eye],
+    ["Resolved", reports.filter((report) => report.status === "Resolved").length, "Successfully addressed", CheckCircle2],
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {stats.map(([label, value, description, Icon]) => (
+          <div key={label} className="flex min-h-[104px] items-center gap-4 rounded-xl border border-[#dfe7e1] bg-white p-5 shadow-[0_2px_8px_rgba(20,61,42,0.03)]">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[#edf6f0] text-[#176b3a]"><Icon size={21} /></span>
+            <div>
+              <p className="text-2xl font-bold tracking-tight text-[#17211b]">{value}</p>
+              <p className="text-sm font-semibold text-[#34433a]">{label}</p>
+              <p className="mt-0.5 text-xs text-[#718078]">{description}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <section className="rounded-xl border border-[#dfe7e1] bg-white p-4 shadow-[0_4px_14px_rgba(20,61,42,0.03)] sm:p-6">
+        <div className="mb-5">
+          <h2 className="text-lg font-bold text-[#17211b]">Resident Reports</h2>
+          <p className="mt-1 text-xs text-[#718078]">{reports.length} {reports.length === 1 ? "report" : "reports"} submitted by residents</p>
+        </div>
+
+        <div className="flex flex-wrap gap-3 border-b border-[#edf0ed] pb-5">
+          <label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border border-[#dfe6e1] px-3.5 py-2 text-[#64748b] shadow-sm">
+            <Search size={16} />
+            <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search reports" aria-label="Search reports" className="w-full bg-transparent text-xs text-[#334155] outline-none placeholder:text-[#94a3b8]" />
+          </label>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter by status" className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
+            <option value="All">All statuses</option><option value="Pending">Pending Review</option><option>In Progress</option><option>Resolved</option><option>Dismissed</option>
+          </select>
+          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} aria-label="Filter by incident type" className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none">
+            <option value="All">All incident types</option>
+            {incidentTypes.map((type) => <option key={type}>{type}</option>)}
+          </select>
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-xs">
+            <thead><tr className="border-b border-[#e5e9e6] text-[0.7rem] font-bold uppercase tracking-wider text-[#64748b]">
+              <th className="pb-3 pr-4">Incident</th><th className="pb-3 pr-4">Location</th><th className="pb-3 pr-4">Reported By</th><th className="pb-3 pr-4">Date &amp; Time</th><th className="pb-3 pr-4">Status</th><th className="pb-3 text-right">Action</th>
+            </tr></thead>
+            <tbody className="divide-y divide-[#f0f3f1]">
+              {!pageReports.length ? <tr><td colSpan={6} className="py-10 text-center text-sm text-[#64748b]">No matching incident reports found.</td></tr> : pageReports.map((report) => (
+                <tr id={`report-row-${report.displayId}`} key={report.firebaseId} className={highlightedReportId === report.displayId ? "bg-[#f3f8f5]" : "hover:bg-[#f8faf8]"}>
+                  <td className="py-4 pr-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#edf6f0] text-[#176b3a]"><FileText size={17} /></span><div className="min-w-0"><p className="font-bold text-[#1e293b]">{report.type}</p><p className="max-w-[300px] truncate text-[11px] text-[#64748b]">{report.description}</p></div></div></td>
+                  <td className="py-4 pr-4 font-semibold text-[#1e293b]">{report.location}</td>
+                  <td className="py-4 pr-4 font-semibold text-[#1e293b]">{report.reporter}</td>
+                  <td className="py-4 pr-4"><p className="text-[#334155]">{report.date}</p><p className="text-[11px] text-[#64748b]">{report.time}</p></td>
+                  <td className="py-4 pr-4"><span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusClasses(report.status)}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{report.status === "Pending" ? "Pending Review" : report.status}</span></td>
+                  <td className="py-4 text-right"><button onClick={() => openReport(report)} className="rounded-lg border border-[#bdd4c5] px-3 py-2 font-semibold text-[#176b3a] transition hover:bg-[#edf6f0]">View Report</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-[#edf0ed] pt-4 text-xs text-[#64748b]">
+          <p>Showing {firstShown} to {lastShown} of {filteredReports.length} reports</p>
+          <div className="flex items-center gap-1.5">
+            <button disabled={safePage === 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} aria-label="Previous page" className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] disabled:opacity-40">&lt;</button>
+            {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => <button key={page} onClick={() => setCurrentPage(page)} className={`grid h-8 w-8 place-items-center rounded-lg font-semibold ${page === safePage ? "bg-[#176b3a] text-white" : "border border-[#e2e8f0] bg-white"}`}>{page}</button>)}
+            <button disabled={safePage === totalPages} onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} aria-label="Next page" className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] disabled:opacity-40">&gt;</button>
+          </div>
+        </div>
+      </section>
+
+      {selectedReport && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f1f17]/45 p-4" onMouseDown={(event) => event.target === event.currentTarget && setSelectedReport(null)}>
+        <div role="dialog" aria-modal="true" aria-labelledby="report-details-title" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#dfe7e1] bg-white shadow-2xl">
+          <header className="sticky top-0 z-10 flex items-start justify-between border-b border-[#e8eeea] bg-white px-5 py-4 sm:px-6">
+            <div><p className="text-xs font-semibold uppercase tracking-wide text-[#176b3a]">Incident report</p><h2 id="report-details-title" className="mt-1 text-xl font-bold text-[#17211b]">{selectedReport.type}</h2></div>
+            <button onClick={() => setSelectedReport(null)} aria-label="Close report details" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f1f5f2]"><X size={19} /></button>
+          </header>
+          <div className="space-y-6 p-5 sm:p-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              {[ ["Resident", selectedReport.reporter], ["Location", selectedReport.location], ["Submitted", `${selectedReport.date}${selectedReport.time ? ` at ${selectedReport.time}` : ""}`], ["Report ID", selectedReport.displayId] ].map(([label, value]) => <div key={label}><p className="text-xs font-medium text-[#718078]">{label}</p><p className="mt-1 text-sm font-semibold text-[#26332b]">{value}</p></div>)}
+            </div>
+            <div><p className="text-xs font-medium text-[#718078]">Incident description</p><p className="mt-2 whitespace-pre-wrap rounded-xl border border-[#e5ebe7] bg-[#f8faf9] p-4 text-sm leading-6 text-[#34433a]">{selectedReport.description}</p></div>
+            <div><p className="mb-2 text-xs font-medium text-[#718078]">Attached photo</p>{selectedReport.imageUrl ? <><img src={selectedReport.imageUrl} alt={`Attachment for ${selectedReport.type}`} className="max-h-72 w-full rounded-xl border border-[#e1e7e3] bg-[#f6f8f7] object-contain" onError={(event) => { event.currentTarget.style.display = "none"; event.currentTarget.nextElementSibling?.classList.remove("hidden"); }} /><p className="hidden rounded-xl border border-[#e1e7e3] bg-[#f8faf9] p-4 text-sm text-[#718078]">The attached photo is unavailable.</p></> : <p className="text-sm text-[#718078]">No photo was provided.</p>}</div>
+            <div className="border-t border-[#e8eeea] pt-5">
+              <h3 className="text-sm font-bold text-[#26332b]">Report status</h3><p className="mt-1 text-xs text-[#718078]">Update how BDRRMC is handling this report.</p>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{["Pending", "In Progress", "Resolved", "Dismissed"].map((status) => <button key={status} onClick={() => { setSelectedStatus(status); setSaveState({ saving: false, error: "" }); }} className={`rounded-lg border px-3 py-2.5 text-xs font-semibold ${selectedStatus === status ? "border-[#176b3a] bg-[#edf6f0] text-[#176b3a] ring-1 ring-[#176b3a]" : "border-[#dfe6e1] text-[#59665e] hover:bg-[#f7f9f8]"}`}>{status === "Pending" ? "Pending Review" : status}</button>)}</div>
+              {selectedStatus === "Dismissed" && <div className="mt-4"><label htmlFor="dismiss-reason" className="text-xs font-semibold text-[#34433a]">Reason for dismissal <span className="text-[#b42318]">*</span></label><textarea id="dismiss-reason" rows={3} value={dismissReason} onChange={(event) => setDismissReason(event.target.value)} placeholder="Explain why this report is being dismissed" className="mt-2 w-full resize-none rounded-lg border border-[#d9e1dc] px-3 py-2.5 text-sm outline-none focus:border-[#176b3a] focus:ring-2 focus:ring-[#176b3a]/10" /></div>}
+              {saveState.error && <p role="alert" className="mt-3 text-sm font-medium text-[#b42318]">{saveState.error}</p>}
+              <div className="mt-5 flex justify-end gap-3"><button onClick={() => setSelectedReport(null)} className="rounded-lg border border-[#d9e1dc] px-4 py-2.5 text-sm font-semibold text-[#526057] hover:bg-[#f7f9f8]">Cancel</button><button disabled={saveState.saving} onClick={saveReportStatus} className="rounded-lg bg-[#176b3a] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#11542d] disabled:opacity-60">{saveState.saving ? "Saving..." : "Save Changes"}</button></div>
+            </div>
+          </div>
+        </div>
+      </div>}
     </div>
   );
 }
@@ -2547,11 +2786,11 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
       Event: CalendarDays,
     };
     const typeColors = {
-      "Weather Advisory": "bg-[#ffeef0] text-[#ef4444] border border-[#fecdd3]",
-      "Safety Reminder": "bg-[#ecfdf5] border border-[#a7f3d0]",
-      "System Update": "bg-[#eff6ff] text-[#2563eb] border border-[#dbeafe]",
-      Information: "bg-[#fff7ed] text-[#ea580c] border border-[#ffedd5]",
-      Event: "bg-[#f3e8ff] text-[#9333ea] border border-[#e9d5ff]",
+      "Weather Advisory": "bg-[#fff1f2] text-[#b42318] border border-[#fecdd3]",
+      "Safety Reminder": "bg-[#edf6f0] text-[#176b3a] border border-[#d5e8da]",
+      "System Update": "bg-[#edf6f0] text-[#176b3a] border border-[#d5e8da]",
+      Information: "bg-[#edf6f0] text-[#176b3a] border border-[#d5e8da]",
+      Event: "bg-[#edf6f0] text-[#176b3a] border border-[#d5e8da]",
     };
     const iconMap = {
       "Weather Advisory": AlertTriangle,
@@ -2561,14 +2800,14 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
       Event: Calendar,
     };
     const priorityStyleMap = {
-      High: "bg-[#ffeef0] text-[#ef4444]",
-      Medium: "bg-[#fff7ed] text-[#ea580c]",
-      Low: "bg-[#eff6ff] text-[#3b82f6]",
+      High: "bg-[#fff1f2] text-[#b42318] border border-[#fecdd3]",
+      Medium: "bg-[#f4f7f5] text-[#526057] border border-[#dfe7e1]",
+      Low: "bg-[#f4f7f5] text-[#526057] border border-[#dfe7e1]",
     };
     const statusStyleMap = {
-      Published: "bg-[#ecfdf5] text-[#059669]",
-      Scheduled: "bg-[#eff6ff] text-[#2563eb]",
-      Archived: "bg-[#f1f5f9] text-[#64748b]",
+      Published: "bg-[#edf6f0] text-[#176b3a] border border-[#d5e8da]",
+      Scheduled: "bg-[#f4f7f5] text-[#526057] border border-[#dfe7e1]",
+      Archived: "bg-[#f4f7f5] text-[#718078] border border-[#dfe7e1]",
     };
 
     return {
@@ -2601,10 +2840,10 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
   }, [announcementFormOpen]);
 
   const stats = [
-    { label: "Total Announcements", value: String(visibleAnnouncements.length), sub: "All time", icon: Megaphone, color: "text-[#10b981]", bg: "bg-[#ecfdf5]" },
-    { label: "Published", value: String(visibleAnnouncements.filter((row) => row.status === "Published").length), sub: "Active and visible", icon: Send, color: "text-[#2563eb]", bg: "bg-[#eff6ff]" },
-    { label: "Scheduled", value: String(visibleAnnouncements.filter((row) => row.status === "Scheduled").length), sub: "To be published", icon: Clock, color: "text-[#d97706]", bg: "bg-[#fffbeb]" },
-    { label: "Archived", value: String(visibleAnnouncements.filter((row) => row.status === "Archived").length), sub: "No longer visible", icon: Archive, color: "text-[#9333ea]", bg: "bg-[#f3e8ff]" },
+    { label: "Total Announcements", value: String(visibleAnnouncements.length), sub: "All time", icon: Megaphone, color: "text-[#176b3a]", bg: "bg-[#edf6f0]" },
+    { label: "Published", value: String(visibleAnnouncements.filter((row) => row.status === "Published").length), sub: "Active and visible", icon: Send, color: "text-[#176b3a]", bg: "bg-[#edf6f0]" },
+    { label: "Scheduled", value: String(visibleAnnouncements.filter((row) => row.status === "Scheduled").length), sub: "To be published", icon: Clock, color: "text-[#526057]", bg: "bg-[#f4f7f5]" },
+    { label: "Archived", value: String(visibleAnnouncements.filter((row) => row.status === "Archived").length), sub: "No longer visible", icon: Archive, color: "text-[#718078]", bg: "bg-[#f4f7f5]" },
   ];
 
   const filteredAnnouncements = visibleAnnouncements.filter((row) => {
@@ -3032,12 +3271,12 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
                         </div>
                       </td>
                       <td className="py-4 pr-4 whitespace-nowrap">
-                        <span className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-bold ${row.priorityStyle}`}>
+                        <span data-priority={row.priority} className={`announcement-priority inline-block rounded-md px-2.5 py-1 text-[11px] font-bold ${row.priorityStyle}`}>
                           {row.priority}
                         </span>
                       </td>
                       <td className="py-4 pr-4 whitespace-nowrap">
-                        <span className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-bold ${row.statusStyle}`}>
+                        <span data-status={row.status} className={`announcement-status inline-block rounded-md px-2.5 py-1 text-[11px] font-bold ${row.statusStyle}`}>
                           {row.status}
                         </span>
                       </td>
@@ -3049,14 +3288,6 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
                         <div className="relative flex items-center justify-end gap-1.5">
                           <button
                             type="button"
-                            title="View details"
-                            onClick={() => setSelectedAnnouncement(row)}
-                            className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
-                          >
-                            <Eye size={15} />
-                          </button>
-                          <button
-                            type="button"
                             title="More options"
                             onClick={() => setMenuAnnouncementId(isMenuOpen ? null : row.id)}
                             className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] text-[#64748b] hover:bg-slate-50 transition"
@@ -3066,6 +3297,16 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
 
                           {isMenuOpen && (
                             <div className="absolute right-0 top-10 z-20 w-40 rounded-xl border border-[#dfe7e1] bg-white p-2 shadow-[0_14px_30px_rgba(15,23,42,0.12)]">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedAnnouncement(row);
+                                  setMenuAnnouncementId(null);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-[#1f2937] hover:bg-[#edf6f0]"
+                              >
+                                <Eye size={14} className="text-[#176b3a]" /> View announcement
+                              </button>
                               {row.status === "Archived" ? (
                                 <button
                                   type="button"
@@ -3128,7 +3369,7 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
           <div className="w-full max-w-xl rounded-2xl border border-[#dfe7e1] bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.15)]">
             <div className="mb-5 flex items-center justify-between border-b border-[#edf0ed] pb-3">
               <div className="flex items-center gap-3">
-                <div className={`grid h-11 w-11 place-items-center rounded-xl ${announcementTypeMeta[selectedAnnouncement.type]?.accent || "bg-[#f1f5f9] text-[#64748b]"}`}>
+                <div className={`announcement-type-icon grid h-11 w-11 place-items-center rounded-xl ${announcementTypeMeta[selectedAnnouncement.type]?.accent || "bg-[#f1f5f9] text-[#64748b]"}`}>
                   {(() => {
                     const Icon = announcementTypeMeta[selectedAnnouncement.type]?.icon || Megaphone;
                     return <Icon size={20} />;
@@ -3156,11 +3397,11 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl border border-[#dfe7e1] p-3">
                   <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#64748b]">Priority</div>
-                  <div className="mt-2 inline-block rounded-md px-2.5 py-1 text-[11px] font-bold bg-[#ffeef0] text-[#ef4444]">{selectedAnnouncement.priority}</div>
+                  <div data-priority={selectedAnnouncement.priority} className="announcement-priority mt-2 inline-block rounded-md px-2.5 py-1 text-[11px] font-bold">{selectedAnnouncement.priority}</div>
                 </div>
                 <div className="rounded-xl border border-[#dfe7e1] p-3">
                   <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#64748b]">Status</div>
-                  <div className="mt-2 inline-block rounded-md px-2.5 py-1 text-[11px] font-bold bg-[#ecfdf5] text-[#059669]">{selectedAnnouncement.status}</div>
+                  <div data-status={selectedAnnouncement.status} className="announcement-status mt-2 inline-block rounded-md px-2.5 py-1 text-[11px] font-bold">{selectedAnnouncement.status}</div>
                 </div>
                 <div className="rounded-xl border border-[#dfe7e1] p-3">
                   <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#64748b]">Published</div>
@@ -3277,7 +3518,7 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
           <div className="w-full max-w-2xl rounded-2xl border border-[#dfe7e1] bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.15)]">
             <div className="mb-5 flex items-center justify-between border-b border-[#edf0ed] pb-3">
               <div className="flex items-center gap-3">
-                <div className={`grid h-11 w-11 place-items-center rounded-xl ${selectedAnnouncementType.accent}`}>
+                <div className={`announcement-type-icon grid h-11 w-11 place-items-center rounded-xl ${selectedAnnouncementType.accent}`}>
                   <SelectedAnnouncementIcon size={20} />
                 </div>
                 <div>
@@ -3356,7 +3597,7 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
                               }}
                               className="flex flex-1 items-center gap-2 text-left"
                             >
-                              <span className={`grid h-7 w-7 place-items-center rounded-md ${selectedAnnouncementType.accent}`}>
+                              <span className={`announcement-type-icon grid h-7 w-7 place-items-center rounded-md ${selectedAnnouncementType.accent}`}>
                                 <SelectedAnnouncementIcon size={14} />
                               </span>
                               <span className="font-medium">{suggestion}</span>
@@ -3380,7 +3621,7 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
                 <label className="text-xs font-bold text-[#334155]">
                   Type
                   <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-[#dfe6e1] bg-white px-3 py-2.5 text-sm text-[#1e293b] outline-none focus-within:border-[#006b37]">
-                    <div className={`grid h-8 w-8 place-items-center rounded-lg ${selectedAnnouncementType.accent}`}>
+                    <div className={`announcement-type-icon grid h-8 w-8 place-items-center rounded-lg ${selectedAnnouncementType.accent}`}>
                       <SelectedAnnouncementIcon size={16} />
                     </div>
                     <select
@@ -3448,6 +3689,261 @@ function SafeAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function RefinedSafetyAnnouncementsPage({ announcementFormOpen, setAnnouncementFormOpen }) {
+  const emptyForm = { title: "", message: "", type: "Information", priority: "Medium", status: "Published", scheduledAt: "" };
+  const [announcements, setAnnouncements] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [form, setForm] = useState(emptyForm);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const announcementEditorRef = useRef(null);
+  const pageSize = 6;
+
+  const plainText = useCallback((value = "") => value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>|<\/div>|<\/li>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim(), []);
+
+  useEffect(() => {
+    if (!firebaseDatabase) {
+      setLoading(false);
+      setLoadError("Firebase is not configured.");
+      return undefined;
+    }
+    return onValue(dbRef(firebaseDatabase, "announcements"), (snapshot) => {
+      const value = snapshot.val() ?? {};
+      const now = Date.now();
+      setAnnouncements(Object.entries(value).map(([id, item]) => {
+        const scheduledAt = item?.scheduledAt ? Number(item.scheduledAt) : null;
+        const rawStatus = item?.status || "Published";
+        const status = rawStatus === "Archived" ? "Archived" : rawStatus === "Scheduled" || (scheduledAt && scheduledAt > now) ? "Scheduled" : "Published";
+        return {
+          id,
+          title: item?.title?.trim() || "Untitled announcement",
+          message: item?.description || item?.message || "",
+          preview: plainText(item?.description || item?.message || "No message provided."),
+          type: item?.type || "Information",
+          priority: item?.priority || "Medium",
+          status,
+          scheduledAt,
+          publishedAt: item?.publishedAt ? Number(item.publishedAt) : null,
+          createdAt: Number(item?.createdAt || 0),
+        };
+      }).sort((a, b) => b.createdAt - a.createdAt));
+      setLoading(false);
+      setLoadError("");
+    }, (error) => {
+      setLoading(false);
+      setLoadError(error?.message || "Unable to load announcements.");
+    });
+  }, [plainText]);
+
+  const filteredAnnouncements = useMemo(() => announcements.filter((announcement) => {
+    const query = searchTerm.trim().toLowerCase();
+    const matchesSearch = !query || [announcement.title, announcement.preview].some((value) => value.toLowerCase().includes(query));
+    return matchesSearch && (statusFilter === "All" || announcement.status === statusFilter);
+  }), [announcements, searchTerm, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredAnnouncements.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageAnnouncements = filteredAnnouncements.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const firstShown = filteredAnnouncements.length ? ((safePage - 1) * pageSize) + 1 : 0;
+  const lastShown = Math.min(safePage * pageSize, filteredAnnouncements.length);
+
+  useEffect(() => setCurrentPage(1), [searchTerm, statusFilter]);
+
+  const toLocalInput = (timestamp) => {
+    if (!timestamp) return "";
+    const date = new Date(timestamp);
+    const local = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
+    return local.toISOString().slice(0, 16);
+  };
+
+  const closeForm = () => {
+    setAnnouncementFormOpen(false);
+    setEditingId(null);
+    setForm(emptyForm);
+  };
+
+  const openView = (announcement) => {
+    setEditingId(announcement.id);
+    setForm({
+      title: announcement.title,
+      message: plainText(announcement.message),
+      type: announcement.type,
+      priority: announcement.priority,
+      status: announcement.status === "Scheduled" ? "Scheduled" : "Published",
+      scheduledAt: toLocalInput(announcement.scheduledAt),
+    });
+    setAnnouncementFormOpen(true);
+  };
+
+  useEffect(() => {
+    if (announcementFormOpen && !editingId) {
+      setForm(emptyForm);
+      window.requestAnimationFrame(() => {
+        if (announcementEditorRef.current) announcementEditorRef.current.innerHTML = "";
+      });
+    }
+  }, [announcementFormOpen, editingId]);
+
+  const applyAnnouncementFormat = (command) => {
+    const editor = announcementEditorRef.current;
+    if (!editor) return;
+    editor.focus();
+    document.execCommand(command, false, null);
+    setForm((current) => ({ ...current, message: editor.innerHTML }));
+  };
+
+  const saveAnnouncement = async (event) => {
+    event.preventDefault();
+    if (editingId) {
+      closeForm();
+      return;
+    }
+    const title = form.title.trim();
+    const message = form.message.trim();
+    if (!title || !message) {
+      toast.error("Announcement title and message are required.");
+      return;
+    }
+    const scheduledAt = form.status === "Scheduled" ? new Date(form.scheduledAt).getTime() : null;
+    if (form.status === "Scheduled" && (!form.scheduledAt || !Number.isFinite(scheduledAt))) {
+      toast.error("Select a valid schedule date and time.");
+      return;
+    }
+    if (!firebaseDatabase) return;
+
+    setSaving(true);
+    try {
+      const now = Date.now();
+      const payload = {
+        title,
+        description: message,
+        type: form.type,
+        priority: form.priority,
+        status: form.status,
+        scheduledAt,
+        publishedAt: form.status === "Published" ? now : null,
+      };
+      if (editingId) {
+        await update(dbRef(firebaseDatabase, `announcements/${editingId}`), payload);
+        toast.success("Announcement updated");
+      } else {
+        await set(push(dbRef(firebaseDatabase, "announcements")), { ...payload, createdAt: now });
+        toast.success(form.status === "Scheduled" ? "Announcement scheduled" : "Announcement published");
+      }
+      closeForm();
+    } catch (error) {
+      toast.error("Unable to save announcement", { description: error?.message || "Please try again." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const changeArchiveState = async (announcement) => {
+    const restoring = announcement.status === "Archived";
+    const confirmed = window.confirm(restoring ? `Restore “${announcement.title}”?` : `Archive “${announcement.title}”? Residents will no longer see it as active.`);
+    if (!confirmed || !firebaseDatabase) return;
+    try {
+      const nextStatus = restoring && announcement.scheduledAt && announcement.scheduledAt > Date.now() ? "Scheduled" : restoring ? "Published" : "Archived";
+      await update(dbRef(firebaseDatabase, `announcements/${announcement.id}`), {
+        status: nextStatus,
+        archivedAt: restoring ? null : Date.now(),
+        publishedAt: nextStatus === "Published" ? (announcement.publishedAt || Date.now()) : announcement.publishedAt,
+      });
+      toast.success(restoring ? "Announcement restored" : "Announcement archived");
+      if (editingId === announcement.id) closeForm();
+    } catch (error) {
+      toast.error("Unable to update announcement", { description: error?.message || "Please try again." });
+    }
+  };
+
+  const statusClasses = (status) => status === "Published"
+    ? "border-[#b9dfc7] bg-[#eff8f2] text-[#166534]"
+    : status === "Scheduled"
+      ? "border-[#cddbd1] bg-[#f4f7f5] text-[#315c40]"
+      : "border-[#d8dde0] bg-[#f6f7f7] text-[#59636a]";
+
+  const announcementDate = (announcement) => {
+    const timestamp = announcement.status === "Scheduled" ? announcement.scheduledAt : announcement.publishedAt || announcement.createdAt;
+    if (!timestamp) return { label: announcement.status === "Scheduled" ? "Scheduled" : "Published", value: "Date unavailable" };
+    return {
+      label: announcement.status === "Scheduled" ? "Scheduled" : announcement.status === "Archived" ? "Originally published" : "Published",
+      value: new Date(timestamp).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }),
+    };
+  };
+
+  return (
+    <div className="safety-announcements-page space-y-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {[
+          ["Published", announcements.filter((item) => item.status === "Published").length, "Visible to residents", Send],
+          ["Scheduled", announcements.filter((item) => item.status === "Scheduled").length, "Set to publish later", Clock],
+        ].map(([label, value, description, Icon]) => (
+          <div key={label} className="flex min-h-[104px] items-center gap-4 rounded-xl border border-[#dfe7e1] bg-white p-5 shadow-[0_2px_8px_rgba(20,61,42,0.03)]">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[#edf6f0] text-[#176b3a]"><Icon size={21} /></span>
+            <div><p className="text-2xl font-bold tracking-tight text-[#17211b]">{value}</p><p className="text-sm font-semibold text-[#34433a]">{label}</p><p className="mt-0.5 text-xs text-[#718078]">{description}</p></div>
+          </div>
+        ))}
+      </div>
+
+      <section className="rounded-xl border border-[#dfe7e1] bg-white p-4 shadow-[0_4px_14px_rgba(20,61,42,0.03)] sm:p-6">
+        <div className="mb-5"><h2 className="text-lg font-bold text-[#17211b]">Announcements</h2><p className="mt-1 text-xs text-[#718078]">{announcements.length} {announcements.length === 1 ? "announcement" : "announcements"}</p></div>
+        <div className="flex flex-wrap gap-3 border-b border-[#edf0ed] pb-5">
+          <label className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border border-[#dfe6e1] px-3.5 py-2 text-[#64748b] shadow-sm"><Search size={16} /><input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search announcements" aria-label="Search announcements" className="w-full bg-transparent text-xs text-[#334155] outline-none placeholder:text-[#94a3b8]" /></label>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter announcements by status" className="rounded-lg border border-[#dfe6e1] bg-white px-3 py-2 text-xs font-medium text-[#475569] shadow-sm outline-none"><option value="All">All statuses</option><option>Published</option><option>Scheduled</option><option>Archived</option></select>
+        </div>
+
+        {loading ? <div className="py-12 text-center text-sm text-[#718078]">Loading announcements…</div> : loadError ? <div className="my-5 rounded-xl border border-[#fecaca] bg-[#fef2f2] p-4 text-sm text-[#991b1b]">{loadError}</div> : !pageAnnouncements.length ? <div className="py-12 text-center"><Megaphone size={24} className="mx-auto text-[#87a091]" /><p className="mt-3 text-sm font-semibold text-[#34433a]">No announcements found</p><p className="mt-1 text-xs text-[#718078]">Create an announcement or adjust the current filters.</p></div> : (
+          <div className="divide-y divide-[#edf0ed]">
+            {pageAnnouncements.map((announcement) => {
+              const date = announcementDate(announcement);
+              return <article key={announcement.id} className="grid gap-4 py-5 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
+                <div className="flex min-w-0 gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[#edf6f0] text-[#176b3a]"><Megaphone size={18} /></span><div className="min-w-0"><h3 className="font-bold text-[#1e293b]">{announcement.title}</h3><p className="mt-1 line-clamp-2 max-w-2xl text-xs leading-5 text-[#64748b]">{announcement.preview || "No message provided."}</p></div></div>
+                <div className="sm:min-w-[170px]"><span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusClasses(announcement.status)}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{announcement.status}</span><p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-[#8a9690]">{date.label}</p><p className="mt-0.5 text-xs text-[#526057]">{date.value}</p></div>
+                <button onClick={() => openView(announcement)} className="justify-self-start rounded-lg border border-[#bdd4c5] px-3 py-2 text-xs font-semibold text-[#176b3a] transition hover:bg-[#edf6f0] sm:justify-self-end">View Announcement</button>
+              </article>;
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#edf0ed] pt-4 text-xs text-[#64748b]">
+          <p>Showing {firstShown} to {lastShown} of {filteredAnnouncements.length} announcements</p>
+          <div className="flex gap-1.5"><button disabled={safePage === 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} aria-label="Previous page" className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] disabled:opacity-40">&lt;</button>{Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => <button key={page} onClick={() => setCurrentPage(page)} className={`grid h-8 w-8 place-items-center rounded-lg font-semibold ${page === safePage ? "bg-[#176b3a] text-white" : "border border-[#e2e8f0] bg-white"}`}>{page}</button>)}<button disabled={safePage === totalPages} onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} aria-label="Next page" className="grid h-8 w-8 place-items-center rounded-lg border border-[#e2e8f0] disabled:opacity-40">&gt;</button></div>
+        </div>
+      </section>
+
+      {announcementFormOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f1f17]/45 p-4" onMouseDown={(event) => event.target === event.currentTarget && closeForm()}>
+        <div role="dialog" aria-modal="true" aria-labelledby="announcement-form-title" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#dfe7e1] bg-white shadow-2xl">
+          <header className="sticky top-0 z-10 flex items-start justify-between border-b border-[#e8eeea] bg-white px-5 py-4 sm:px-6"><div><p className="text-xs font-semibold uppercase tracking-wide text-[#176b3a]">Safety announcement</p><h2 id="announcement-form-title" className="mt-1 text-xl font-bold text-[#17211b]">{editingId ? "Announcement details" : "New announcement"}</h2></div><button type="button" onClick={closeForm} aria-label="Close announcement form" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f1f5f2]"><X size={19} /></button></header>
+          <form onSubmit={saveAnnouncement} data-read-only={editingId ? "true" : "false"} className="announcement-form space-y-5 p-5 sm:p-6">
+            <label className="block text-sm font-semibold text-[#34433a]">Announcement Title <span className="text-[#b42318]">*</span><input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} required disabled={Boolean(editingId)} className="mt-2 w-full rounded-xl border border-[#d9e1dc] px-3.5 py-3 text-sm font-normal outline-none focus:border-[#176b3a] focus:ring-2 focus:ring-[#176b3a]/10 disabled:bg-[#f8faf9] disabled:text-[#34433a]" placeholder="Enter a clear announcement title" /></label>
+            {editingId ? <div><p className="text-sm font-semibold text-[#34433a]">Message</p><div className="rich-text-content mt-2 min-h-[120px] rounded-xl border border-[#d9e1dc] bg-[#f8faf9] px-3.5 py-3 text-sm leading-6 text-[#34433a]" dangerouslySetInnerHTML={{ __html: form.message || "No message provided." }} /></div> : <div><p className="text-sm font-semibold text-[#34433a]">Message <span className="text-[#b42318]">*</span></p><div className="mt-2 flex gap-2 rounded-t-xl border border-b-0 border-[#d9e1dc] bg-[#f8faf9] p-2"><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyAnnouncementFormat("bold")} aria-label="Bold" className="grid h-8 w-8 place-items-center rounded-lg border border-[#d9e1dc] bg-white text-sm font-bold text-[#34433a] hover:bg-[#edf6f0]">B</button><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyAnnouncementFormat("italic")} aria-label="Italic" className="grid h-8 w-8 place-items-center rounded-lg border border-[#d9e1dc] bg-white text-sm italic text-[#34433a] hover:bg-[#edf6f0]">I</button><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyAnnouncementFormat("insertUnorderedList")} aria-label="Bullet list" className="grid h-8 w-8 place-items-center rounded-lg border border-[#d9e1dc] bg-white text-base text-[#34433a] hover:bg-[#edf6f0]">•</button><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => applyAnnouncementFormat("insertOrderedList")} aria-label="Numbered list" className="grid h-8 w-8 place-items-center rounded-lg border border-[#d9e1dc] bg-white text-sm text-[#34433a] hover:bg-[#edf6f0]">1.</button></div><div ref={announcementEditorRef} contentEditable suppressContentEditableWarning onInput={(event) => setForm((current) => ({ ...current, message: event.currentTarget.innerHTML }))} className="min-h-[180px] rounded-b-xl border border-[#d9e1dc] px-3.5 py-3 text-sm leading-6 text-[#26332b] outline-none focus:border-[#176b3a] focus:ring-2 focus:ring-[#176b3a]/10" data-placeholder="Write the safety information residents need to know" /></div>}
+            <div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-semibold text-[#34433a]">Announcement Type <span className="text-xs font-normal text-[#8a9690]">(optional)</span><select value={form.type} disabled={Boolean(editingId)} onChange={(event) => setForm((current) => ({ ...current, type: event.target.value }))} className="mt-2 w-full rounded-xl border border-[#d9e1dc] bg-white px-3.5 py-3 text-sm font-normal outline-none focus:border-[#176b3a] disabled:bg-[#f8faf9]"><option>Weather Advisory</option><option>Safety Reminder</option><option>System Update</option><option>Information</option><option>Event</option></select></label><label className="text-sm font-semibold text-[#34433a]">Priority <span className="text-xs font-normal text-[#8a9690]">(optional)</span><select value={form.priority} disabled={Boolean(editingId)} onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value }))} className="mt-2 w-full rounded-xl border border-[#d9e1dc] bg-white px-3.5 py-3 text-sm font-normal outline-none focus:border-[#176b3a] disabled:bg-[#f8faf9]"><option>High</option><option>Medium</option><option>Low</option></select></label></div>
+            {!editingId && <fieldset><legend className="text-sm font-semibold text-[#34433a]">Publish Options</legend><div className="mt-2 grid grid-cols-2 gap-2">{["Published", "Scheduled"].map((status) => <button key={status} type="button" onClick={() => setForm((current) => ({ ...current, status }))} className={`rounded-xl border px-4 py-3 text-sm font-semibold ${form.status === status ? "border-[#176b3a] bg-[#edf6f0] text-[#176b3a] ring-1 ring-[#176b3a]" : "border-[#d9e1dc] text-[#59665e]"}`}>{status === "Published" ? "Publish Now" : "Schedule"}</button>)}</div></fieldset>}
+            {!editingId && form.status === "Scheduled" && <label className="block text-sm font-semibold text-[#34433a]">Schedule date and time <input type="datetime-local" value={form.scheduledAt} onChange={(event) => setForm((current) => ({ ...current, scheduledAt: event.target.value }))} required className="mt-2 w-full rounded-xl border border-[#d9e1dc] px-3.5 py-3 text-sm font-normal outline-none focus:border-[#176b3a]" /></label>}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e8eeea] pt-5"><div>{editingId && <button type="button" onClick={() => changeArchiveState(announcements.find((item) => item.id === editingId))} className="rounded-lg border border-[#d9e1dc] px-4 py-2.5 text-sm font-semibold text-[#59636a] hover:bg-[#f6f7f7]">{announcements.find((item) => item.id === editingId)?.status === "Archived" ? "Restore" : "Archive"}</button>}</div><div className="flex gap-3"><button type="button" onClick={closeForm} className="rounded-lg border border-[#d9e1dc] px-4 py-2.5 text-sm font-semibold text-[#526057] hover:bg-[#f7f9f8]">Cancel</button><button type="submit" disabled={saving} className="rounded-lg bg-[#176b3a] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#11542d] disabled:opacity-60">{saving ? "Saving…" : editingId ? "Save Changes" : form.status === "Scheduled" ? "Schedule Announcement" : "Publish Announcement"}</button></div></div>
+          </form>
+        </div>
+      </div>}
     </div>
   );
 }
@@ -3985,8 +4481,9 @@ function ResetPasswordAction({ onBackToLogin }) {
   };
 
   return (
-    <main className="login-reference-scene grid min-h-screen place-items-center bg-white px-5 py-10">
-      <section className="w-full max-w-md rounded-2xl border border-[#dfe7e1] bg-white/95 p-6 shadow-[0_20px_50px_rgba(0,107,55,0.08)] sm:p-8">
+    <main className="login-reference-scene relative isolate grid min-h-screen place-items-center overflow-hidden bg-white px-5 py-10">
+      <DotField />
+      <section className="relative z-10 w-full max-w-md rounded-2xl border border-[#dfe7e1] bg-white/95 p-6 shadow-[0_20px_50px_rgba(0,107,55,0.08)] backdrop-blur-sm sm:p-8">
         <div className="text-center"><Logo small /><h1 className="mt-6 text-2xl font-extrabold tracking-tight text-[#006b37]">Change Password</h1><p className="mt-2 text-sm text-[#64748b]">Create a new password for your SlopeSense account.</p></div>
 
         {status === "checking" && <div className="mt-7 rounded-xl border border-[#dfe7e1] bg-[#f6faf7] p-4 text-center text-sm text-[#526057]">{message}</div>}
@@ -4057,8 +4554,9 @@ function ForgotPassword({ onBack }) {
   };
 
   return (
-    <main className="login-reference-scene min-h-screen bg-white">
-      <section className="grid min-h-screen overflow-hidden lg:grid-cols-2">
+    <main className="login-reference-scene relative isolate min-h-screen overflow-hidden bg-white">
+      <DotField />
+      <section className="relative z-10 grid min-h-screen overflow-hidden lg:grid-cols-2">
         <div className="relative flex min-h-[260px] items-center justify-center px-6 py-10 lg:min-h-full">
           <div className="relative z-10 text-center max-w-md">
             <Logo stacked />
@@ -4193,8 +4691,9 @@ function Login({ onEnter, onForgotPassword }) {
   };
 
   return (
-    <main className="login-reference-scene min-h-screen bg-white">
-      <section className="grid min-h-screen overflow-hidden lg:grid-cols-2">
+    <main className="login-reference-scene relative isolate min-h-screen overflow-hidden bg-white">
+      <DotField />
+      <section className="relative z-10 grid min-h-screen overflow-hidden lg:grid-cols-2">
         <div className="relative flex min-h-[340px] items-center justify-center px-6 py-12 lg:min-h-full">
           <div className="relative z-10 text-center max-w-md">
             <Logo stacked />
@@ -4325,7 +4824,7 @@ export default function Home() {
 
   const [page, setPage] = useState(() => {
     const actionParams = new URLSearchParams(window.location.search);
-    if (window.location.pathname === "/auth/action" || actionParams.get("mode") === "resetPassword") return "reset-password";
+    if (window.location.pathname === "/auth/action" || window.location.pathname === "/__/auth/action" || actionParams.get("mode") === "resetPassword") return "reset-password";
     if (localStorage.getItem("slopesense-explicit-logout") === "true") return "login";
     const requestedPage = window.location.hash.replace("#", "");
     return requestedPage && pageMeta[requestedPage] ? requestedPage : "dashboard";

@@ -157,9 +157,10 @@
     line-height: 1rem;
   }
 
-  .dashboard-sensor-icon {
+.dashboard-sensor-icon {
     filter: brightness(0) saturate(100%) invert(34%) sepia(16%) saturate(1450%) hue-rotate(99deg) brightness(91%) contrast(88%);
   }
+
 }
 
 @media (min-width: 640px) {
@@ -312,6 +313,10 @@
 
 .login-reference-scene::after {
   content: none;
+}
+
+.announcement-form[data-read-only="true"] button[type="submit"] {
+  display: none;
 }
 
 @media (max-width: 1023px) {
