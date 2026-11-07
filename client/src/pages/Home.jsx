@@ -65,6 +65,29 @@ import { SectionPulseIcon } from "@/components/DashboardIcons";
 import DotField from "@/components/DotField";
 import { firebaseAuth, firebaseDatabase } from "@/lib/firebase";
 
+function richTextToPlainText(value = "") {
+  return String(value)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\s*li\b[^>]*>/gi, "\n• ")
+    .replace(/<\s*\/li\s*>/gi, "")
+    .replace(/<\s*\/p\s*>/gi, "\n")
+    .replace(/<\s*\/div\s*>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function cleanNotificationDescription(value = "") {
+  return richTextToPlainText(value).replace(/\s•\s[A-Za-z0-9_-]{20,}$/g, " • Reported by Resident");
+}
+
 const dashboardIcons = {
   warning: "/dashboard-icons/Warning.png",
   alerts: "/dashboard-icons/Active Alert.png",
@@ -1370,6 +1393,43 @@ function buildLiveAlertsFromSensors(liveSensors = {}) {
 }
 
 function SensorSettingsModal({ open, onClose }) {
+  const defaults = { soilWarning: 70, rainTrigger: 601, sensitivity: "medium" };
+  const [settings, setSettings] = useState(defaults);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open || !firebaseDatabase) return undefined;
+    return onValue(dbRef(firebaseDatabase, "sensorConfig"), (snapshot) => {
+      const value = snapshot.val() ?? {};
+      setSettings({
+        soilWarning: Number(value.soil?.warning ?? defaults.soilWarning),
+        rainTrigger: Number(value.rain?.trigger ?? defaults.rainTrigger),
+        sensitivity: value.sensitivity ?? defaults.sensitivity,
+      });
+    });
+  }, [open]);
+
+  const saveSettings = async () => {
+    const soilWarning = Math.max(0, Math.min(100, Number(settings.soilWarning)));
+    const rainTrigger = Math.max(0, Math.min(1023, Number(settings.rainTrigger)));
+    setSaving(true);
+    try {
+      await set(dbRef(firebaseDatabase, "sensorConfig"), {
+        soil: { warning: soilWarning },
+        rain: { trigger: rainTrigger },
+        sensitivity: settings.sensitivity,
+        updatedAt: Date.now(),
+        updatedBy: firebaseAuth?.currentUser?.uid ?? "dashboard",
+      });
+      toast.success("Sensor settings saved successfully.");
+      onClose();
+    } catch (error) {
+      toast.error("Unable to save sensor settings", { description: error?.message || "Check Firebase permissions." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -1389,18 +1449,18 @@ function SensorSettingsModal({ open, onClose }) {
           <div>
             <label className="block font-bold text-[#1f2937]">Soil Moisture Warning Threshold (%)</label>
             <p className="mb-1.5 text-[11px] text-[#64748b]">Sets the moisture level that requires administrator attention.</p>
-            <input type="number" min="0" max="100" defaultValue={70} className="w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]" />
+            <input type="number" min="0" max="100" value={settings.soilWarning} onChange={(event) => setSettings((current) => ({ ...current, soilWarning: event.target.value }))} className="w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]" />
           </div>
 
           <div>
             <label className="block font-bold text-[#1f2937]">Rainfall Trigger Threshold (ADC)</label>
             <p className="mb-1.5 text-[11px] text-[#64748b]">Uses the calibrated rain sensor range from 0 to 1023 ADC.</p>
-            <input type="number" min="0" max="1023" defaultValue={601} className="w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]" />
+            <input type="number" min="0" max="1023" value={settings.rainTrigger} onChange={(event) => setSettings((current) => ({ ...current, rainTrigger: event.target.value }))} className="w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]" />
           </div>
 
           <div>
             <label className="block font-bold text-[#1f2937]">Tilt and Vibration Sensitivity</label>
-            <select defaultValue="medium" className="mt-1.5 w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]">
+            <select value={settings.sensitivity} onChange={(event) => setSettings((current) => ({ ...current, sensitivity: event.target.value }))} className="mt-1.5 w-full rounded-lg border border-[#dfe7e1] px-3 py-2 text-xs font-semibold text-[#1f2937] outline-none focus:border-[#006b37]">
               <option value="high">High sensitivity (instant trigger)</option>
               <option value="medium">Medium sensitivity (recommended)</option>
               <option value="low">Low sensitivity (filtered)</option>
@@ -1409,7 +1469,7 @@ function SensorSettingsModal({ open, onClose }) {
 
           <div className="flex justify-end gap-2 border-t border-[#edf0ed] pt-4">
             <button onClick={onClose} className="rounded-lg border border-[#dfe7e1] px-4 py-2 text-xs font-bold text-[#64748b] hover:bg-slate-50">Cancel</button>
-            <button onClick={() => { onClose(); toast.success("Sensor settings saved successfully."); }} className="rounded-lg bg-[#006b37] px-4 py-2 text-xs font-bold text-white hover:bg-[#00522a]">Save Changes</button>
+            <button disabled={saving} onClick={() => void saveSettings()} className="rounded-lg bg-[#006b37] px-4 py-2 text-xs font-bold text-white hover:bg-[#00522a] disabled:opacity-60">{saving ? "Saving..." : "Save Changes"}</button>
           </div>
         </div>
       </div>
@@ -2344,7 +2404,7 @@ function LegacyIncidentReportsPage({ highlightedReportId, setHighlightedReportId
                         </span>
                         <div>
                           <div className="font-bold text-[#1e293b]">{row.type}</div>
-                          <div className="text-[11px] text-[#64748b]">{row.desc}</div>
+                          <div className="whitespace-pre-line text-[11px] text-[#64748b]">{richTextToPlainText(row.desc)}</div>
                         </div>
                       </div>
                     </td>
@@ -4879,10 +4939,12 @@ export default function Home() {
   const unreadNotifications = notifications.filter((notification) => !notification.read).length;
 
   const addNotification = useCallback((title, description, tone = "info", targetPage = "dashboard", reportId = null) => {
+    const cleanTitle = richTextToPlainText(title);
+    const cleanDescription = cleanNotificationDescription(description);
     const isDuplicate = notifications.some(
       (notification) =>
-        notification.title === title &&
-        notification.description === description &&
+        notification.title === cleanTitle &&
+        notification.description === cleanDescription &&
         notification.targetPage === targetPage &&
         notification.reportId === reportId
     );
@@ -4893,8 +4955,8 @@ export default function Home() {
 
     const item = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-      title,
-      description,
+      title: cleanTitle,
+      description: cleanDescription,
       tone,
       targetPage,
       reportId,
@@ -4905,13 +4967,13 @@ export default function Home() {
     setNotifications((previous) => [item, ...previous].slice(0, 25));
 
     if (tone === "success") {
-      toast.success(title, { description });
+      toast.success(cleanTitle, { description: cleanDescription });
     } else if (tone === "warning") {
-      toast.warning(title, { description });
+      toast.warning(cleanTitle, { description: cleanDescription });
     } else if (tone === "error") {
-      toast.error(title, { description });
+      toast.error(cleanTitle, { description: cleanDescription });
     } else {
-      toast.info(title, { description });
+      toast.info(cleanTitle, { description: cleanDescription });
     }
   }, [notifications]);
 
@@ -5124,8 +5186,8 @@ export default function Home() {
           const item = value[reportId] ?? {};
           const type = item.incidentType || "Incident";
           const location = item.location || "Unknown location";
-          const reporterName = item.residentId ? (userMap[item.residentId] || item.residentId) : "Resident";
-          const compactDescription = `${type} • ${location} • ${reporterName}`;
+          const reporterName = item.residentId ? (userMap[item.residentId] || "Resident") : "Resident";
+          const compactDescription = `${type} • ${location} • Reported by ${reporterName}`;
           addNotification(title, compactDescription, "success", "incidents", `#INC-${String(reportId).slice(0, 8).toUpperCase()}`);
         });
       }
@@ -5218,13 +5280,23 @@ export default function Home() {
                   <div className="absolute right-0 top-12 z-50 w-[360px] rounded-2xl border border-[#e2e8f0] bg-white p-3 shadow-[0_18px_45px_rgba(15,23,42,0.15)]">
                     <div className="mb-2 flex items-center justify-between border-b border-[#edf2f7] pb-2">
                       <div className="text-sm font-extrabold text-[#0f172a]">Notifications</div>
-                      <button
-                        type="button"
-                        onClick={() => setNotifications((previous) => previous.map((item) => ({ ...item, read: true })))}
-                        className="text-[11px] font-bold text-[#006b37]"
-                      >
-                        Mark all read
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setNotifications((previous) => previous.map((item) => ({ ...item, read: true })))}
+                          className="text-[11px] font-bold text-[#006b37]"
+                        >
+                          Mark all read
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNotifications([])}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-[#b42318]"
+                        >
+                          <Trash2 size={12} />
+                          Clear all
+                        </button>
+                      </div>
                     </div>
 
                     <div className="max-h-[320px] space-y-2 overflow-y-auto">
@@ -5260,8 +5332,8 @@ export default function Home() {
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div>
-                                <div className="text-xs font-extrabold text-[#0f172a]">{notification.title}</div>
-                                <div className="mt-1 text-[11px] leading-relaxed text-[#475569]">{notification.description}</div>
+                                <div className="text-xs font-extrabold text-[#0f172a]">{richTextToPlainText(notification.title)}</div>
+                                <div className="mt-1 whitespace-pre-line text-[11px] leading-relaxed text-[#475569]">{cleanNotificationDescription(notification.description)}</div>
                               </div>
                               {!notification.read && (
                                 <span className="mt-0.5 h-2.5 w-2.5 rounded-full bg-[#ef4444]" />
