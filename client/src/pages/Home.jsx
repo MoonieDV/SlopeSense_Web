@@ -1166,6 +1166,110 @@ const buildFallbackEnvironmentalEvents = (now = Date.now()) => [
   { timestamp: now - 2 * 60 * 60 * 1000, event: "Rainfall is light", reading: "138 ADC · Light", status: "NORMAL", isFallback: true },
 ];
 
+function SensorRegistration({ monitoringSensorData = [] }) {
+  const [assignments, setAssignments] = useState({});
+  const [selectedId, setSelectedId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sensorFilter, setSensorFilter] = useState("All sensors");
+  const [form, setForm] = useState({ label: "", area: "", landmark: "" });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!firebaseDatabase) return undefined;
+    return onValue(dbRef(firebaseDatabase, "sensorAssignments"), (snapshot) => {
+      setAssignments(snapshot.val() ?? {});
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const current = assignments[selectedId] ?? {};
+    setForm({ label: current.label || "", area: current.area || "", landmark: current.landmark || "" });
+  }, [assignments, selectedId]);
+
+  const openRegistration = (sensorId) => {
+    setSelectedId(sensorId || monitoringSensorData[0]?.id || "soil");
+    setDrawerOpen(true);
+  };
+
+  const filteredSensors = monitoringSensorData.filter((sensor) =>
+    sensorFilter === "All sensors" || sensor.name.toLowerCase().includes(sensorFilter.toLowerCase())
+  );
+
+  const saveAssignment = async (event) => {
+    event.preventDefault();
+    if (!firebaseDatabase || !form.area.trim()) return;
+    setSaving(true);
+    try {
+      const sensorIndex = Math.max(0, monitoringSensorData.findIndex((sensor) => sensor.id === selectedId));
+      await set(dbRef(firebaseDatabase, `sensorAssignments/${selectedId}`), {
+        firmwareId: `S-${String(sensorIndex + 1).padStart(3, "0")}`,
+        label: form.label.trim() || monitoringSensorData.find((sensor) => sensor.id === selectedId)?.name || selectedId,
+        area: form.area.trim(),
+        landmark: form.landmark.trim(),
+        updatedAt: new Date().toISOString(),
+      });
+      toast.success("Sensor assignment saved", { description: "The deployment location is now linked to this sensor." });
+      setDrawerOpen(false);
+    } catch (error) {
+      toast.error("Unable to save sensor assignment", { description: error?.message || "Check Firebase permissions." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="dashboard-card p-5 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#edf0ed] pb-4">
+        <div>
+          <h2 className="dashboard-section-title">Sensor Deployment Register</h2>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-[#64748b]">Keep a simple field record of where each sensor is deployed. This works without GPS.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={sensorFilter} onChange={(e) => setSensorFilter(e.target.value)} className="rounded-lg border border-[#dfe7e1] bg-white px-3 py-2.5 text-xs font-bold text-[#475569] outline-none focus:border-[#087442]">
+            {['All sensors', 'Soil', 'Rain', 'Tilt', 'Vibration'].map((filter) => <option key={filter}>{filter}</option>)}
+          </select>
+          <button type="button" onClick={() => openRegistration()} className="inline-flex items-center gap-2 rounded-lg bg-[#087442] px-3.5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-[#065e35]"><Check size={15} /> Register sensor</button>
+        </div>
+      </div>
+
+      <div className="mt-5 overflow-x-auto">
+        <table className="w-full min-w-[620px] text-left text-xs">
+          <thead><tr className="border-b border-[#e5ebe6] text-[0.68rem] font-bold uppercase tracking-[0.06em] text-[#64748b]"><th className="pb-3 pr-4">Firmware ID</th><th className="pb-3 pr-4">Sensor</th><th className="pb-3 pr-4">Assigned location</th><th className="pb-3 pr-4">Status</th><th className="pb-3 text-right">Action</th></tr></thead>
+          <tbody className="divide-y divide-[#f1f5f9]">
+          {filteredSensors.map((sensor) => {
+            const assigned = assignments[sensor.id];
+            const firmwareId = `S-${String(monitoringSensorData.indexOf(sensor) + 1).padStart(3, "0")}`;
+            return <tr key={sensor.id} className="text-[#475569]">
+              <td className="py-3.5 pr-4 font-mono text-[0.7rem] font-bold text-[#27352f]">{assigned?.firmwareId || firmwareId}</td>
+              <td className="py-3.5 pr-4 font-bold text-[#27352f]">{assigned?.label || sensor.name}</td>
+              <td className="py-3.5 pr-4">{assigned?.area ? <><span className="font-semibold text-[#27352f]">{assigned.area}</span>{assigned.landmark && <span className="block text-[0.68rem] text-[#94a3b8]">{assigned.landmark}</span>}</> : <span className="text-[#94a3b8]">Not registered</span>}</td>
+              <td className="py-3.5 pr-4"><span className={`rounded-full px-2 py-0.5 text-[0.62rem] font-bold ${assigned?.area ? "bg-[#eaf7ee] text-[#15803d]" : "bg-[#f1f5f9] text-[#64748b]"}`}>{assigned?.area ? "REGISTERED" : "UNREGISTERED"}</span></td>
+              <td className="py-3.5 text-right"><button type="button" onClick={() => openRegistration(sensor.id)} className="font-bold text-[#087442] hover:underline">{assigned?.area ? "Edit" : "Register"}</button></td>
+            </tr>;
+          })}
+          {filteredSensors.length === 0 && <tr><td colSpan={5} className="py-8 text-center text-xs text-[#64748b]">No sensors match this filter.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      {drawerOpen && <>
+        <button type="button" aria-label="Close sensor registration" onClick={() => setDrawerOpen(false)} className="fixed inset-0 z-40 bg-slate-950/30" />
+        <aside className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-[#dfe7e1] bg-white p-6 shadow-2xl" aria-label="Sensor registration drawer">
+          <div className="flex items-start justify-between border-b border-[#edf0ed] pb-4"><div><div className="text-[0.68rem] font-bold uppercase tracking-[0.08em] text-[#087442]">Sensor registration</div><h3 className="mt-1 text-lg font-extrabold text-[#111827]">Assign deployment location</h3></div><button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg p-2 text-[#64748b] hover:bg-slate-100" aria-label="Close"><X size={19} /></button></div>
+          <form onSubmit={saveAssignment} className="mt-6 flex flex-1 flex-col">
+            <div className="rounded-xl bg-[#f1faf4] p-4"><div className="text-[0.68rem] font-bold uppercase tracking-[0.08em] text-[#53635a]">Selected firmware ID</div><div className="mt-1 font-mono text-lg font-extrabold text-[#087442]">{`S-${String(Math.max(0, monitoringSensorData.findIndex((sensor) => sensor.id === selectedId)) + 1).padStart(3, "0")}`}</div><div className="mt-1 text-xs text-[#64748b]">{monitoringSensorData.find((sensor) => sensor.id === selectedId)?.name || "Sensor"}</div></div>
+            <label className="mt-5 text-xs font-bold text-[#475569]">Display label<input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Upper Slope Soil" className="mt-1.5 w-full rounded-lg border border-[#dfe7e1] px-3 py-2.5 text-xs outline-none focus:border-[#087442]" /></label>
+            <label className="mt-4 text-xs font-bold text-[#475569]">Assigned area <span className="text-[#b42318]">*</span><input required value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} placeholder="e.g. Sitio Mabini, Zone 2" className="mt-1.5 w-full rounded-lg border border-[#dfe7e1] px-3 py-2.5 text-xs outline-none focus:border-[#087442]" /></label>
+            <label className="mt-4 text-xs font-bold text-[#475569]">Landmark or field notes <span className="font-medium text-[#94a3b8]">(optional)</span><textarea rows={4} value={form.landmark} onChange={(e) => setForm({ ...form, landmark: e.target.value })} placeholder="e.g. beside the concrete footbridge" className="mt-1.5 w-full resize-none rounded-lg border border-[#dfe7e1] px-3 py-2.5 text-xs outline-none focus:border-[#087442]" /></label>
+            <div className="mt-auto pt-6"><button type="submit" disabled={saving || !firebaseDatabase} className="w-full rounded-lg bg-[#087442] px-4 py-3 text-xs font-bold text-white hover:bg-[#065e35] disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Saving..." : "Save registration"}</button>{!firebaseDatabase && <p className="mt-2 text-[0.68rem] text-[#b42318]">Firebase is not configured, so registrations cannot be saved.</p>}</div>
+          </form>
+        </aside>
+      </>}
+    </section>
+  );
+}
+
 function SensorsPage({ monitoringSensorData = [], sensorHistory = {} }) {
   const [activeTimeRange, setActiveTimeRange] = useState("24H");
   const rangeMilliseconds = { "1H": 60 * 60 * 1000, "6H": 6 * 60 * 60 * 1000, "24H": 24 * 60 * 60 * 1000, "7D": 7 * 24 * 60 * 60 * 1000 };
@@ -1272,6 +1376,8 @@ function SensorsPage({ monitoringSensorData = [], sensorHistory = {} }) {
 
         <MonitoringThresholdGuide />
       </div>
+
+      <SensorRegistration monitoringSensorData={monitoringSensorData} />
     </div>
   );
 }
