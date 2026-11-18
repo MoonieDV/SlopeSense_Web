@@ -127,15 +127,27 @@ const getDetectionState = (sensor = {}, candidateFields = []) => {
   return false;
 };
 
+const SENSOR_HEARTBEAT_TIMEOUT_MS = 10 * 60 * 1000;
+
+const getSensorTimestamp = (sensor = {}) => {
+  const raw = sensor.updatedAt ?? sensor.receivedAt ?? sensor.timestamp;
+  if (raw === undefined || raw === null || raw === "") return 0;
+
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    // Firebase/firmware timestamps may be in seconds or milliseconds.
+    return numeric < 100000000000 ? numeric * 1000 : numeric;
+  }
+
+  const parsed = Date.parse(String(raw));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const isSensorOffline = (sensor = {}) => {
   if (!sensor || Object.keys(sensor).length === 0) return true;
 
-  const updatedAt = Number(sensor.receivedAt ?? sensor.updatedAt ?? sensor.timestamp ?? 0);
-  if (!Number.isFinite(updatedAt) || updatedAt <= 0) {
-    return true;
-  }
-
-  return Date.now() - updatedAt > 10 * 60 * 1000;
+  const updatedAt = getSensorTimestamp(sensor);
+  return updatedAt <= 0 || Date.now() - updatedAt > SENSOR_HEARTBEAT_TIMEOUT_MS;
 };
 
 const buildSensorData = (liveSensors = {}) => {
@@ -5165,37 +5177,36 @@ export default function Home() {
         return;
       }
 
-      const receivedAt = Date.now();
       const nextSensors = {
         soil: Object.keys(soil).length === 0 ? {} : {
           moisturePercent: Number(soil.moisturePercent ?? 0),
           rawValue: Number(soil.rawValue ?? 0),
           level: soil.level ?? "NORMAL",
           sensorType: soil.sensorType ?? "soilMoisture",
-          updatedAt: Number(soil.updatedAt ?? soil.timestamp ?? 0),
-          receivedAt,
+          updatedAt: getSensorTimestamp(soil),
+          receivedAt: getSensorTimestamp(soil),
         },
         rain: Object.keys(rain).length === 0 ? {} : {
           rawValue: Number(rain.rawValue ?? 0),
           level: rain.level ?? "DRY",
-          updatedAt: Number(rain.updatedAt ?? rain.timestamp ?? 0),
-          receivedAt,
+          updatedAt: getSensorTimestamp(rain),
+          receivedAt: getSensorTimestamp(rain),
         },
         tilt: Object.keys(tilt).length === 0 ? {} : {
           tiltDetected: getDetectionState(tilt, ["tiltDetected", "detected", "value", "level", "status"]),
           level: tilt.level ?? (getDetectionState(tilt, ["tiltDetected", "detected", "value", "level", "status"]) ? "TILT DETECTED" : "STABLE"),
           sensorType: tilt.sensorType ?? "tilt",
           tiltChange: Number(tilt.tiltChange ?? tilt.changeX ?? tilt.changeY ?? 0),
-          updatedAt: Number(tilt.updatedAt ?? tilt.timestamp ?? 0),
-          receivedAt,
+          updatedAt: getSensorTimestamp(tilt),
+          receivedAt: getSensorTimestamp(tilt),
         },
         vibration: Object.keys(vibration).length === 0 ? {} : {
           vibrationDetected: getDetectionState(vibration, ["vibrationDetected", "detected", "value", "level", "status"]),
           level: vibration.level ?? (getDetectionState(vibration, ["vibrationDetected", "detected", "value", "level", "status"]) ? "VIBRATION DETECTED" : "NORMAL"),
           sensorType: vibration.sensorType ?? "vibration",
           vibrationValue: Number(vibration.value ?? vibration.rawValue ?? 0),
-          updatedAt: Number(vibration.updatedAt ?? vibration.timestamp ?? 0),
-          receivedAt,
+          updatedAt: getSensorTimestamp(vibration),
+          receivedAt: getSensorTimestamp(vibration),
         },
       };
 
