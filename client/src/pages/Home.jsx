@@ -1477,7 +1477,7 @@ function SensorSettingsModal({ open, onClose }) {
   );
 }
 
-const buildReadableLiveAlerts = (liveSensors = {}, location = "Monitoring location unavailable") => {
+const buildReadableLiveAlerts = (liveSensors = {}, location = "Monitoring location unavailable", sensorHistory = {}) => {
   const soil = liveSensors.soil ?? {};
   const rain = liveSensors.rain ?? {};
   const tilt = liveSensors.tilt ?? {};
@@ -1489,6 +1489,21 @@ const buildReadableLiveAlerts = (liveSensors = {}, location = "Monitoring locati
   const movementDetected = tiltDetected || vibrationDetected;
   const detectedAt = Math.max(Number(soil.receivedAt ?? 0), Number(rain.receivedAt ?? 0), Number(tilt.receivedAt ?? 0), Number(vibration.receivedAt ?? 0));
   const alerts = [];
+
+  const addHistoryAlerts = (type, title, description, condition, recommended, reading, threshold, danger = false) => {
+    (sensorHistory[type] ?? []).forEach((record, index) => {
+      const value = getHistoryValue(type, record);
+      const exceedsThreshold = type === "soil" ? value >= 60 : type === "rain" ? value >= 601 : value === 1;
+      if (!exceedsThreshold) return;
+      const detectedAt = getHistoryTimestamp(record);
+      alerts.push({ id: `history-${type}-${detectedAt}-${index}`, title, description: description(value), location, detectedAt, condition: condition(value), status: "resolved", recommended, reading: reading(value), threshold, danger, historical: true });
+    });
+  };
+
+  addHistoryAlerts("soil", "Elevated Soil Moisture", (value) => `Historical sensor reading reached ${value}% and exceeded the normal range.`, (value) => value >= 80 ? "High soil moisture" : "Elevated soil moisture", "Review the reading alongside rainfall and movement history.", (value) => `${value}%`, "60%", true);
+  addHistoryAlerts("rain", "Rainfall Exceeded Normal", (value) => `Historical rain sensor reading reached ${value} ADC and exceeded the normal range.`, (value) => value >= 801 ? "Heavy rainfall" : "Moderate rainfall", "Review rainfall alongside soil moisture and movement history.", (value) => `${value} ADC`, "601 ADC");
+  addHistoryAlerts("tilt", "Possible Slope Movement", () => "The historical tilt sensor record detected a change in slope position.", () => "Movement detected", "Compare this event with rainfall and soil moisture readings.", () => "Detected", "No movement");
+  addHistoryAlerts("vibration", "Ground Vibration Detected", () => "The historical vibration sensor record detected ground movement.", () => "Vibration detected", "Review the monitored area if vibration persists.", () => "Detected", "No movement");
 
   if (rainValue >= 801 && soilMoisture >= 80 && movementDetected) {
     alerts.push({
@@ -1566,13 +1581,13 @@ const buildReadableLiveAlerts = (liveSensors = {}, location = "Monitoring locati
   return alerts.sort((a, b) => b.detectedAt - a.detectedAt);
 };
 
-function SimplifiedAlertsPage({ liveSensors = {}, profile = {}, setPage }) {
+function SimplifiedAlertsPage({ liveSensors = {}, profile = {}, sensorHistory = {}, setPage }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [filter, setFilter] = useState("all");
   const [selectedAlert, setSelectedAlert] = useState(null);
   const barangay = profile.barangay ? (/^barangay\b/i.test(profile.barangay) ? profile.barangay : `Barangay ${profile.barangay}`) : "Monitoring area";
   const location = [barangay, profile.city].filter(Boolean).join(", ");
-  const alerts = buildReadableLiveAlerts(liveSensors, location);
+  const alerts = [...buildReadableLiveAlerts(liveSensors, location, sensorHistory)].sort((a, b) => b.detectedAt - a.detectedAt);
   const activeCount = alerts.filter((alert) => alert.status === "attention").length;
   const resolvedCount = alerts.filter((alert) => alert.status === "resolved").length;
   const visibleAlerts = alerts.filter((alert) => {
@@ -4934,6 +4949,7 @@ export default function Home() {
     }
   };
   const lastAlertRef = useRef(getStoredLastSensorAlert());
+  const sensorAlertActiveRef = useRef(Boolean(getStoredLastSensorAlert()));
   const previousIncidentIdsRef = useRef(new Set());
 
   const unreadNotifications = notifications.filter((notification) => !notification.read).length;
@@ -5102,7 +5118,8 @@ export default function Home() {
 
       if (alertMessage.length > 0) {
         const message = alertMessage.join(" • ");
-        if (lastAlertRef.current !== message) {
+        if (!sensorAlertActiveRef.current) {
+          sensorAlertActiveRef.current = true;
           lastAlertRef.current = message;
           try {
             localStorage.setItem(LAST_SENSOR_ALERT_KEY, message);
@@ -5111,7 +5128,8 @@ export default function Home() {
           }
           addNotification("Sensor notification", message, "warning", "alerts");
         }
-      } else if (lastAlertRef.current) {
+      } else if (sensorAlertActiveRef.current) {
+        sensorAlertActiveRef.current = false;
         lastAlertRef.current = null;
         try {
           localStorage.removeItem(LAST_SENSOR_ALERT_KEY);
@@ -5422,6 +5440,7 @@ export default function Home() {
                   <SimplifiedAlertsPage
                     liveSensors={liveSensors}
                     profile={profile}
+                    sensorHistory={sensorHistory}
                     setPage={setPage}
                   />
                 )}
